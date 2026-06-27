@@ -2,9 +2,11 @@ name: Continuous X Scrapers Run
 
 on:
   schedule:
-    # Set to run every minute (Queuing limits on Github may stretch this to every 5-10m)
-    - cron: '* * * * *'
-  workflow_dispatch: # Allows manual run inside the Actions UI
+    # Retain this as a fallback (GitHub will run it on its own best-effort schedule)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allows manual UI runs
+  repository_dispatch: # Allows external, instant API triggers
+    types: [run-x-scrapers]
 
 jobs:
   run-scrapers:
