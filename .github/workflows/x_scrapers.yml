@@ -37,16 +37,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-uv-playwright-
 
+          # Run `uv sync` to set up dependencies inside the cloned directory
       - name: Sync uv packages
         run: |
           cd x-scraper
           uv sync
 
+          # Corrected: Removed "sudo" from the uv run command. 
+          # Playwright will handle standard system level dependency installation internally.
       - name: Install Playwright and System Dependencies
         run: |
           cd x-scraper
           uv run playwright install chromium
-          sudo uv run playwright install-deps chromium
+          uv run playwright install-deps chromium
           sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Install repository requirements
