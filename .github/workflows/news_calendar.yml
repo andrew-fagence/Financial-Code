@@ -1,14 +1,13 @@
-name: Daily Forex Data Script
+name: Weekly News Calendar Run
 
 on:
   schedule:
-    # Runs at 08:00 UTC every day. 
-    # You can adjust the time using standard cron syntax.
-    - cron: '0 8 * * *'
-  workflow_dispatch: # This allows you to run the script manually from the GitHub UI
+    # Runs at 00:05 every Monday.
+    - cron: '5 0 * * 1'
+  workflow_dispatch: # Allows manual run inside the Actions UI
 
 jobs:
-  run-script:
+  run-calendar:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,9 +22,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run main script
+      - name: Run Calendar Script
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
-          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: python main.py
+        run: python news_calendar.py
