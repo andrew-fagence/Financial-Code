@@ -1,0 +1,81 @@
+name: Continuous X Scrapers Run
+
+on:
+  schedule:
+    # Set to run every minute (Queuing limits on Github may stretch this to every 5-10m)
+    - cron: '* * * * *'
+  workflow_dispatch: # Allows manual run inside the Actions UI
+
+jobs:
+  run-scrapers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone x-scraper repository
+        run: |
+          rm -rf x-scraper
+          git clone https://github.com/proxidize/x-scraper
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv tool
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Cache for uv & Playwright
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-uv-playwright-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-playwright-
+
+      - name: Sync uv packages
+        run: |
+          cd x-scraper
+          uv sync
+
+      - name: Install Playwright and System Dependencies
+        run: |
+          cd x-scraper
+          uv run playwright install chromium
+          sudo uv run playwright install-deps chromium
+          sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Install repository requirements
+        run: pip install -r requirements.txt
+
+      - name: Write Session Cookies File
+        env:
+          PLAYWRIGHT_COOKIES: ${{ secrets.PLAYWRIGHT_COOKIES }}
+        run: |
+          if [ -n "$PLAYWRIGHT_COOKIES" ]; then
+            echo "$PLAYWRIGHT_COOKIES" > playwright_cookies.json
+          else
+            echo "No PLAYWRIGHT_COOKIES secret found; falling back to automated auth."
+          fi
+
+      - name: Run FinancialJuice Scraper
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
+          TWITTER_EMAIL: ${{ secrets.TWITTER_EMAIL }}
+          TWITTER_PASSWORD: ${{ secrets.TWITTER_PASSWORD }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: python x_scraper.py
+
+      - name: Run News Scroller Scraper
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
+          TWITTER_EMAIL: ${{ secrets.TWITTER_EMAIL }}
+          TWITTER_PASSWORD: ${{ secrets.TWITTER_PASSWORD }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: python x_scraper_scroller.py
