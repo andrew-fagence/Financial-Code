@@ -262,6 +262,8 @@ def update_google_sheet_with_tweets(accounts):
             content = re.sub(r"🔴\s*LIVE updates:", "", content, flags=re.IGNORECASE)
             content = re.sub(r"Here's what we know\.", "", content, flags=re.IGNORECASE)
             content = re.sub(r"\s*For more on this and other news visit.*$", "", content, flags=re.IGNORECASE)
+            content = re.sub(r"🔊", "", content)
+            content = re.sub(r"Listen to the daily Reuters World News podcast for the latest", "", content, flags=re.IGNORECASE)
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
             content = re.sub(r"\s+", " ", content).strip()
 
