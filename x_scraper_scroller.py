@@ -257,6 +257,7 @@ def update_google_sheet_with_tweets(accounts):
 
             # Sanitization logic
             content = re.sub(r"^BREAKING:\s*", "", content, flags=re.IGNORECASE)
+            content = re.sub(r"^UPDATE:\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"^EXCLUSIVE:\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"🔴\s*More on", "", content, flags=re.IGNORECASE)
             content = re.sub(r"🔴\s*LIVE updates:", "", content, flags=re.IGNORECASE)
