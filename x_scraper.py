@@ -5,6 +5,7 @@ import os
 import subprocess
 import shutil
 import gspread
+import zoneinfo
 from oauth2client.service_account import ServiceAccountCredentials
 
 # Config
@@ -272,6 +273,8 @@ def update_google_sheet_with_tweets(accounts):
 
             try:
                 dt = datetime.datetime.strptime(timestamp_str, "%a %b %d %H:%M:%S %z %Y")
+                # Convert the time explicitly to UK timezone (handles GMT/BST automatically)
+                dt = dt.astimezone(zoneinfo.ZoneInfo("Europe/London"))
                 formatted_time = dt.strftime("%Y-%m-%d %H:%M")
             except ValueError:
                 formatted_time = timestamp_str
