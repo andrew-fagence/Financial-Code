@@ -265,16 +265,25 @@ def update_google_sheet_with_tweets(accounts):
             content = re.sub(r"\s*For more on this and other news visit.*$", "", content, flags=re.IGNORECASE)
             content = re.sub(r"🔊", "", content)
             
-            # Match any sentence (bounding by ., !, ?, or newline) that contains BOTH "reuters" and "podcast" and remove it
-            content = re.sub(r"[^.!?\n]*?(?:reuters[^.!?\n]*?podcast|podcast[^.!?\n]*?reuters)[^.!?\n]*?[.!?\n]*", "", content, flags=re.IGNORECASE)
+            # Match the whole sentence containing BOTH "reuters" and "podcast" and remove it completely
+            content = re.sub(r"[^.!?\n]*(?:reuters[^.!?\n]*podcast|podcast[^.!?\n]*reuters)[^.!?\n]*[.!?\n]*", "", content, flags=re.IGNORECASE)
             
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
+
+            # Sanitize ALL emojis out of text (including zero-width joiners, skin tones, and keycaps)
+            content = re.sub(
+                r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u200d\ufe0f\U0001F1E6-\U0001F1FF\u20e3]",
+                "",
+                content
+            )
+
             content = re.sub(r"\s+", " ", content).strip()
 
             if not content:
                 continue
             
-            if not content.endswith('.'):
+            # Append a full stop only if the content does not end in a full stop (.), exclamation mark (!), or question mark (?)
+            if not content.endswith(('.', '!', '?')):
                 content += '.'
 
             date_str = tweet.get("created_at") or tweet.get("date") or ""
