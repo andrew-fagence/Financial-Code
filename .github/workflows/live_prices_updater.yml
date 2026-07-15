@@ -1,7 +1,10 @@
 name: TradingView to Sheets Automator
 
 on:
-  workflow_dispatch: # Allows manual trigger and cron-job.org API trigger
+  workflow_dispatch: 
+  schedule:
+    # Runs every 15 minutes. Change this cron syntax to fit your needs!
+    - cron: '*/15 * * * *'
 
 jobs:
   run-updater:
