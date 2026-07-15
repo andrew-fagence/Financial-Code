@@ -3,7 +3,7 @@ name: TradingView to Sheets Automator
 on:
   workflow_dispatch: 
   schedule:
-    # Runs every 15 minutes. Change this cron syntax to fit your needs!
+    # Runs every minute. Change this cron syntax to fit your needs!
     - cron: '* * * * *'
 
 jobs:
