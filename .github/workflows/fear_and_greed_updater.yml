@@ -1,4 +1,4 @@
-name: Update Market Data
+name: Update Fear & Greed
 
 on:
   workflow_dispatch: 
