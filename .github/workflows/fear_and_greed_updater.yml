@@ -1,7 +1,10 @@
 name: Update Market Data
 
 on:
-  workflow_dispatch: # This allows the workflow to be triggered via API by cron-job.org
+  workflow_dispatch: 
+  schedule:
+    # Runs every minute. Change this cron syntax to fit your needs!
+    - cron: '* * * * *'
 
 jobs:
   run-python-script:
@@ -23,4 +26,4 @@ jobs:
       - name: Run Script
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-        run: python main.py
+        run: python fear_and_greed.py
