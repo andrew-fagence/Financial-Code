@@ -2,3 +2,5 @@ requests
 gspread
 oauth2client
 pytz
+google-auth
+fear-and-greed
