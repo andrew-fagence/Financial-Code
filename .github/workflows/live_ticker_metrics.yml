@@ -1,0 +1,36 @@
+name: Live Ticker Metrics 
+
+on:
+  repository_dispatch:
+    types: [trigger-bot]
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          npm install @mathieuc/tradingview googleapis
+          pip install gspread google-auth
+
+      - name: Decrypt Credentials
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > forexdailybias-5ce3a8ede6c9.json
+
+      - name: Run JavaScript Sheets Bot
+        run: node tv_sheets_bot.js
