@@ -33,4 +33,4 @@ jobs:
           echo '${{ secrets.GOOGLE_CREDENTIALS }}' > forexdailybias-5ce3a8ede6c9.json
 
       - name: Run JavaScript Sheets Bot
-        run: node tv_sheets_bot.js
+        run: node live_ticker_metrics.js
