@@ -1,4 +1,4 @@
-name: Run TradingView Sheets Bot
+name: Live Ticker Metrics
 
 on:
   repository_dispatch:
