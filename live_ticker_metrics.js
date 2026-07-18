@@ -39,8 +39,15 @@ const spreadsheetId = '1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU';
 // =====================================================
 // WRITE TO SHEET
 // =====================================================
+
 async function writeToSheet(row, data) {
-    const sheets = google.sheets({ version: 'v4', auth });
+    // Explicitly obtain the authenticated client to prevent implicit resolution failures
+    const authClient = await auth.getClient();
+
+    const sheets = google.sheets({
+        version: 'v4',
+        auth: authClient // Pass the resolved client here
+    });
 
     await sheets.spreadsheets.values.update({
         spreadsheetId,
