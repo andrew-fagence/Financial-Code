@@ -1,0 +1,10 @@
+{
+  "name": "crt-tradingview-bot",
+  "version": "1.0.0",
+  "description": "TradingView CRT to Google Sheets Bot",
+  "main": "bot_engine.js",
+  "dependencies": {
+    "@mathieuc/tradingview": "^1.5.0",
+    "googleapis": "^134.0.0"
+  }
+}
