@@ -1,0 +1,32 @@
+name: CRT Code Automation
+
+on:
+  repository_dispatch:
+    types: [trigger_crt]
+  workflow_dispatch: # Allows manual trigger from the Actions tab
+
+jobs:
+  run-crt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Automation Script
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python crt_code.py
