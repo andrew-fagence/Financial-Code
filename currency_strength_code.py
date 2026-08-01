@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -11,20 +12,26 @@ def get_gspread_client():
 
     or falls back to a local JSON file path.
     """
-    service_account_env = os.environ.get("GCP_CREDENTIALS")
+    service_account_env = os.environ.get("GCP_SERVICE_ACCOUNT")
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
 
     if service_account_env:
         # Running in GitHub Actions
         creds_dict = json.loads(service_account_env)
-        return gspread.service_account_from_dict(creds_dict)
+        return gspread.service_account_from_dict(creds_dict, scopes=scopes)
     else:
         # Fallback for Google Colab / Local Environment
         service_account_file = "/content/forexdailybias-5ce3a8ede6c9.json"
         if os.path.exists(service_account_file):
-            return gspread.service_account(filename=service_account_file)
+            return gspread.service_account(
+                filename=service_account_file, scopes=scopes
+            )
         elif os.path.exists("forexdailybias-5ce3a8ede6c9.json"):
             return gspread.service_account(
-                filename="forexdailybias-5ce3a8ede6c9.json"
+                filename="forexdailybias-5ce3a8ede6c9.json", scopes=scopes
             )
         else:
             raise FileNotFoundError(
@@ -43,24 +50,24 @@ def calculate_csm_for_row(current_row, previous_row):
     # Reconstruct the price of 1 unit of each currency in USD terms
     prices_now = {
         "USD": 1.0,
-        "EUR": current_row["EURUSD=X"],
-        "GBP": current_row["GBPUSD=X"],
-        "AUD": current_row["AUDUSD=X"],
-        "NZD": current_row["NZDUSD=X"],
-        "CAD": 1.0 / current_row["USDCAD=X"],
-        "CHF": 1.0 / current_row["USDCHF=X"],
-        "JPY": 1.0 / current_row["USDJPY=X"],
+        "EUR": float(current_row["EURUSD=X"]),
+        "GBP": float(current_row["GBPUSD=X"]),
+        "AUD": float(current_row["AUDUSD=X"]),
+        "NZD": float(current_row["NZDUSD=X"]),
+        "CAD": 1.0 / float(current_row["USDCAD=X"]),
+        "CHF": 1.0 / float(current_row["USDCHF=X"]),
+        "JPY": 1.0 / float(current_row["USDJPY=X"]),
     }
 
     prices_prev = {
         "USD": 1.0,
-        "EUR": previous_row["EURUSD=X"],
-        "GBP": previous_row["GBPUSD=X"],
-        "AUD": previous_row["AUDUSD=X"],
-        "NZD": previous_row["NZDUSD=X"],
-        "CAD": 1.0 / previous_row["USDCAD=X"],
-        "CHF": 1.0 / previous_row["USDCHF=X"],
-        "JPY": 1.0 / previous_row["USDJPY=X"],
+        "EUR": float(previous_row["EURUSD=X"]),
+        "GBP": float(previous_row["GBPUSD=X"]),
+        "AUD": float(previous_row["AUDUSD=X"]),
+        "NZD": float(previous_row["NZDUSD=X"]),
+        "CAD": 1.0 / float(previous_row["USDCAD=X"]),
+        "CHF": 1.0 / float(previous_row["USDCHF=X"]),
+        "JPY": 1.0 / float(previous_row["USDJPY=X"]),
     }
 
     strength_scores = {c: 0.0 for c in currencies}
@@ -223,25 +230,30 @@ def generate_daily_report():
     )
     monthly_rows = process_timeframe_metrics(monthly_close_df, label="Monthly")
 
-    # Authenticate via custom helper function
+    # Authenticate via helper function
     gc = get_gspread_client()
 
     spreadsheet_id = "1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU"
     sh = gc.open_by_key(spreadsheet_id)
+
+    # Uses the first sheet in the spreadsheet
     worksheet = sh.sheet1
 
+    # Update Daily range L38:P41
     worksheet.update(range_name="L38:P41", values=daily_rows)
     print(
         "\nSuccessfully updated Daily Currency Ranks & Metrics in Google"
         " Spreadsheet (cells L38:P41)."
     )
 
+    # Update Weekly range R38:V41
     worksheet.update(range_name="R38:V41", values=weekly_rows)
     print(
         "Successfully updated Weekly Currency Ranks & Metrics in Google"
         " Spreadsheet (cells R38:V41)."
     )
 
+    # Update Monthly range X38:AB41
     worksheet.update(range_name="X38:AB41", values=monthly_rows)
     print(
         "Successfully updated Monthly Currency Ranks & Metrics in Google"
@@ -253,4 +265,6 @@ if __name__ == "__main__":
     try:
         generate_daily_report()
     except Exception as e:
-        print(f"Error executing report: {e}")
+        print(f"\n[CRITICAL ERROR] Execution failed: {e}")
+        # Explicitly exit with error code 1 so GitHub Actions reports failure if an error occurs
+        sys.exit(1)
