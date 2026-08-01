@@ -12,7 +12,7 @@ def get_gspread_client():
 
     or falls back to a local JSON file path.
     """
-    service_account_env = os.environ.get("GCP_SERVICE_ACCOUNT")
+    service_account_env = os.environ.get("GCP_CREDENTIALS")
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
