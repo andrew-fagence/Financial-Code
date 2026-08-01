@@ -26,6 +26,6 @@ jobs:
 
       - name: Run Currency Strength Code
         env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: |
           python currency_strength_code.py
