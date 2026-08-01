@@ -35,7 +35,7 @@ def get_gspread_client():
             )
         else:
             raise FileNotFoundError(
-                "Service account key not found in GCP_SERVICE_ACCOUNT environment variable or local file."
+                "Service account key not found in GCP_CREDENTIALS environment variable or local file."
             )
 
 
