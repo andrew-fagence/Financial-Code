@@ -8,11 +8,14 @@ import gspread
 
 
 def get_gspread_client():
-    """Authenticates gspread using GitHub Secrets environment variable
+    """Authenticates gspread using GitHub Secrets environment variable (GCP_CREDENTIALS)
 
     or falls back to a local JSON file path.
     """
-    service_account_env = os.environ.get("GCP_CREDENTIALS")
+    # Look for GCP_CREDENTIALS secret first, then GCP_SERVICE_ACCOUNT fallback
+    service_account_env = os.environ.get("GCP_CREDENTIALS") or os.environ.get(
+        "GCP_SERVICE_ACCOUNT"
+    )
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -266,5 +269,4 @@ if __name__ == "__main__":
         generate_daily_report()
     except Exception as e:
         print(f"\n[CRITICAL ERROR] Execution failed: {e}")
-        # Explicitly exit with error code 1 so GitHub Actions reports failure if an error occurs
         sys.exit(1)
