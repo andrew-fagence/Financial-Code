@@ -4,3 +4,6 @@ oauth2client
 pytz
 google-auth
 fear-and-greed
+yfinance
+pandas
+numpy
