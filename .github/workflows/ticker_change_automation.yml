@@ -1,0 +1,29 @@
+name: Ticker Change Automation
+
+on:
+  workflow_dispatch: # This allows cron-job.org (or any API) to trigger the workflow externally
+
+jobs:
+  run-midnight-fetcher:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Create GCP Credentials JSON
+        run: |
+          echo '${{ secrets.GCP_CREDENTIALS }}' > gcp_credentials.json
+
+      - name: Run Python Script
+        run: python ticker_change_since_midnight.py
