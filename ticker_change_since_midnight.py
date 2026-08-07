@@ -75,48 +75,72 @@ async function processSymbol(symbol, row) {
         console.log(`================================`);
 
         let finished = false;
-        const chart = new client.Session.Chart();
+        
+        // TradingView Watchlists use real-time Quote data (not Chart data) to calculate daily Chg and Chg%.
+        // By fetching the Last Price (lp) and Change (ch), we can flawlessly reconstruct the baseline.
+        const quote = new client.Session.Quote({ fields: ['lp', 'ch', 'prev_close_price'] });
+        quote.setMarkets([symbol]);
 
-        // TradingView calculates daily Change and Change % from the official Previous Daily Close.
-        // Using the '1D' timeframe ensures we have baseline data, but we'll extract the exact prev_close_price.
-        chart.setMarket(symbol, { timeframe: '1D' });
+        const quoteData = {};
 
-        chart.onUpdate(async () => {
+        quote.on('data', async (data) => {
             if (finished) return;
             
-            // Ensure we have at least 2 daily candles so we know chart data has arrived
-            if (!chart.periods || chart.periods.length < 2) return;
-            // Also ensure chart infos are loaded to get the exact previous close price
-            if (!chart.infos) return;
+            // Ensure we are catching data for the right symbol
+            if (data.symbol !== symbol) return;
 
-            // The absolute exact starting point for daily change % in TradingView is 'prev_close_price'.
-            // The 1D candle close might differ due to extended hours, weekend closes, or settlement rules.
-            let startingPrice = chart.infos.prev_close_price;
+            // Accumulate incoming payload properties
+            if (data.update) {
+                Object.assign(quoteData, data.update);
+            }
+
+            // The absolute exact starting point for daily change % on the Watchlist is lp - ch.
+            let startingPrice = quoteData.prev_close_price;
             
-            if (startingPrice === undefined && chart.infos.pro_prev_close_price !== undefined) {
-                startingPrice = chart.infos.pro_prev_close_price;
+            if (quoteData.lp !== undefined && quoteData.ch !== undefined) {
+                startingPrice = quoteData.lp - quoteData.ch;
+                // Fix standard JavaScript floating-point artifacts (e.g. 0.8565699999999 becomes 0.85657)
+                startingPrice = parseFloat(startingPrice.toFixed(8));
             }
 
-            // Fallback to the previous completed daily bar if prev_close_price is completely missing
-            if (startingPrice === undefined) {
-                const previousDailyBar = chart.periods[chart.periods.length - 2];
-                startingPrice = previousDailyBar.close;
-            }
-
-            finished = true;
-
-            if (startingPrice !== undefined && startingPrice !== null) {
-                console.log(`\n${symbol} TRADINGVIEW DAILY STARTING POINT`);
-                console.log(`Previous Daily Close Price: ${startingPrice}`);
+            // Once we secure the starting price, log it and send it to the spreadsheet
+            if (startingPrice !== undefined && startingPrice !== null && !isNaN(startingPrice)) {
+                finished = true;
+                console.log(`\n${symbol} TRADINGVIEW WATCHLIST STARTING POINT`);
+                console.log(`Last Price: ${quoteData.lp} | Change: ${quoteData.ch}`);
+                console.log(`Calculated Daily Base Price: ${startingPrice}`);
                 await writeToSheet(row, startingPrice);
-            } else {
-                console.log(`\n${symbol} TRADINGVIEW DAILY STARTING POINT`);
-                console.log('Previous Daily Close Price: undefined (No candle/quote found)');
+                
+                // Cleanup
+                if (typeof quote.delete === 'function') quote.delete();
+                else if (typeof quote.close === 'function') quote.close();
+                resolve();
             }
-
-            if (typeof chart.delete === 'function') chart.delete();
-            resolve();
         });
+
+        // Fallback in case of a slow/closed market without complete updates
+        setTimeout(async () => {
+            if (!finished) {
+                finished = true;
+                console.log(`\n${symbol} TRADINGVIEW QUOTE TIMEOUT`);
+                
+                let fallback = quoteData.prev_close_price;
+                if (quoteData.lp !== undefined && quoteData.ch !== undefined) {
+                    fallback = parseFloat((quoteData.lp - quoteData.ch).toFixed(8));
+                }
+
+                if (fallback !== undefined && fallback !== null && !isNaN(fallback)) {
+                    console.log(`Using Fallback Base Price: ${fallback}`);
+                    await writeToSheet(row, fallback);
+                } else {
+                    console.log(`No valid quote data found for ${symbol}. Market might be fully closed.`);
+                }
+
+                if (typeof quote.delete === 'function') quote.delete();
+                else if (typeof quote.close === 'function') quote.close();
+                resolve();
+            }
+        }, 8000);
     });
 }
 
