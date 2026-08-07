@@ -65,24 +65,6 @@ async function writeToSheet(row, midnightPrice) {
 }
 
 // =====================================================
-// PERFECT UK TIMEZONE CALCULATOR
-// =====================================================
-function getUKDateObj(unixTimestamp) {
-    const date = new Date(unixTimestamp * 1000);
-    const year = date.getUTCFullYear();
-
-    const march31 = new Date(Date.UTC(year, 2, 31));
-    const startBST = new Date(Date.UTC(year, 2, 31 - march31.getUTCDay(), 1));
-
-    const oct31 = new Date(Date.UTC(year, 9, 31));
-    const endBST = new Date(Date.UTC(year, 9, 31 - oct31.getUTCDay(), 1));
-
-    const isBST = date >= startBST && date < endBST;
-    const offsetHours = isBST ? 1 : 0; 
-    return new Date(date.getTime() + offsetHours * 3600 * 1000);
-}
-
-// =====================================================
 // PROCESS SYMBOL
 // =====================================================
 
@@ -95,50 +77,32 @@ async function processSymbol(symbol, row) {
         let finished = false;
         const chart = new client.Session.Chart();
 
-        chart.setMarket(symbol, { timeframe: '60' });
+        // TradingView calculates daily Change and Change % from the Previous Daily Close.
+        // Using the '1D' timeframe gives us exact session closes for each specific asset.
+        chart.setMarket(symbol, { timeframe: '1D' });
 
         chart.onUpdate(async () => {
             if (finished) return;
-            if (!chart.periods || chart.periods.length < 72) return;
+            
+            // Ensure we have at least 2 daily candles (the current ongoing one and the previous completed one)
+            if (!chart.periods || chart.periods.length < 2) return;
 
-            const lastCandle = chart.periods[chart.periods.length - 1];
-            const lastUKObj = getUKDateObj(lastCandle.time);
-            const targetDateStr = `${lastUKObj.getUTCDate()}/${lastUKObj.getUTCMonth() + 1}/${lastUKObj.getUTCFullYear()}`;
-
-            let exactMidnightPrice = null;
-            let firstCandlePrice = null;
-            let firstCandleTime = null;
-
-            for (let i = 0; i < chart.periods.length; i++) {
-                const candle = chart.periods[i];
-                const ukObj = getUKDateObj(candle.time);
-                const ukDate = `${ukObj.getUTCDate()}/${ukObj.getUTCMonth() + 1}/${ukObj.getUTCFullYear()}`;
-                const ukTime = `${ukObj.getUTCHours().toString().padStart(2, '0')}:${ukObj.getUTCMinutes().toString().padStart(2, '0')}`;
-
-                if (ukDate === targetDateStr) {
-                    if (firstCandlePrice === null) {
-                        firstCandlePrice = candle.open;
-                        firstCandleTime = ukTime;
-                    }
-                    if (ukTime === '00:00') {
-                        exactMidnightPrice = candle.open;
-                        break; 
-                    }
-                }
-            }
+            // periods[length - 1] is the current ongoing daily bar
+            // periods[length - 2] is the previous completed daily bar (TradingView's baseline for change %)
+            const previousDailyBar = chart.periods[chart.periods.length - 2];
+            
+            // The starting point for daily change is exactly the previous day's close
+            const startingPrice = previousDailyBar.close;
 
             finished = true;
-            const finalPrice = exactMidnightPrice !== null ? exactMidnightPrice : firstCandlePrice;
-            const timeFound = exactMidnightPrice !== null ? '00:00' : firstCandleTime;
 
-            if (finalPrice !== null) {
-                console.log(`\n${symbol} UK MIDNIGHT / OPEN`);
-                console.log(`Time Found: ${timeFound} UK Time`);
-                console.log(`Open Price: ${finalPrice}`);
-                await writeToSheet(row, finalPrice);
+            if (startingPrice !== undefined && startingPrice !== null) {
+                console.log(`\n${symbol} TRADINGVIEW DAILY STARTING POINT`);
+                console.log(`Previous Daily Close Price: ${startingPrice}`);
+                await writeToSheet(row, startingPrice);
             } else {
-                console.log(`\n${symbol} UK MIDNIGHT`);
-                console.log('UK Midnight Price: undefined (No candle found)');
+                console.log(`\n${symbol} TRADINGVIEW DAILY STARTING POINT`);
+                console.log('Previous Daily Close Price: undefined (No candle found)');
             }
 
             if (typeof chart.delete === 'function') chart.delete();
