@@ -77,29 +77,41 @@ async function processSymbol(symbol, row) {
         let finished = false;
         const chart = new client.Session.Chart();
 
-        // Use the '1D' timeframe to align exactly with TradingView's daily candle
+        // TradingView calculates daily Change and Change % from the official Previous Daily Close.
+        // Using the '1D' timeframe ensures we have baseline data, but we'll extract the exact prev_close_price.
         chart.setMarket(symbol, { timeframe: '1D' });
 
         chart.onUpdate(async () => {
             if (finished) return;
             
-            if (!chart.periods || chart.periods.length < 1) return;
+            // Ensure we have at least 2 daily candles so we know chart data has arrived
+            if (!chart.periods || chart.periods.length < 2) return;
+            // Also ensure chart infos are loaded to get the exact previous close price
+            if (!chart.infos) return;
 
-            // periods[length - 1] is the current ongoing daily bar
-            const currentDailyBar = chart.periods[chart.periods.length - 1];
+            // The absolute exact starting point for daily change % in TradingView is 'prev_close_price'.
+            // The 1D candle close might differ due to extended hours, weekend closes, or settlement rules.
+            let startingPrice = chart.infos.prev_close_price;
             
-            // The starting point for the current day's candle is its Open price
-            const startingPrice = currentDailyBar.open;
+            if (startingPrice === undefined && chart.infos.pro_prev_close_price !== undefined) {
+                startingPrice = chart.infos.pro_prev_close_price;
+            }
+
+            // Fallback to the previous completed daily bar if prev_close_price is completely missing
+            if (startingPrice === undefined) {
+                const previousDailyBar = chart.periods[chart.periods.length - 2];
+                startingPrice = previousDailyBar.close;
+            }
 
             finished = true;
 
             if (startingPrice !== undefined && startingPrice !== null) {
-                console.log(`\n${symbol} TRADINGVIEW DAILY OPEN`);
-                console.log(`Current Daily Open Price: ${startingPrice}`);
+                console.log(`\n${symbol} TRADINGVIEW DAILY STARTING POINT`);
+                console.log(`Previous Daily Close Price: ${startingPrice}`);
                 await writeToSheet(row, startingPrice);
             } else {
-                console.log(`\n${symbol} TRADINGVIEW DAILY OPEN`);
-                console.log('Current Daily Open Price: undefined (No candle found)');
+                console.log(`\n${symbol} TRADINGVIEW DAILY STARTING POINT`);
+                console.log('Previous Daily Close Price: undefined (No candle/quote found)');
             }
 
             if (typeof chart.delete === 'function') chart.delete();
