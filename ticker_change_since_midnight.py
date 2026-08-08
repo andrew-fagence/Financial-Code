@@ -65,6 +65,15 @@ async function writeToSheet(row, price) {
 }
 
 // =====================================================
+// HELPER: FORMAT UTC DATE (YYYY-MM-DD)
+// =====================================================
+
+function getUTCDateString(timestampMs) {
+    const d = new Date(timestampMs);
+    return `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1).toString().padStart(2, '0')}-${d.getUTCDate().toString().padStart(2, '0')}`;
+}
+
+// =====================================================
 // PROCESS SYMBOL
 // =====================================================
 
@@ -82,30 +91,29 @@ async function processSymbol(symbol, row) {
         chart.onUpdate(async () => {
             if (finished) return;
 
-            // Wait until historical daily candles are loaded
+            // Ensure historical daily candles are loaded
             if (!chart.periods || chart.periods.length < 2) return;
 
             finished = true;
 
-            const candles = chart.periods;
-            const lastCandle = candles[candles.length - 1];
+            // Sort candles chronologically by timestamp ascending
+            const sortedCandles = [...chart.periods].sort((a, b) => a.time - b.time);
+            const latestCandle = sortedCandles[sortedCandles.length - 1];
 
-            const now = new Date();
-            const lastCandleDate = new Date(lastCandle.time * 1000);
+            const todayStr = getUTCDateString(Date.now());
+            const latestCandleStr = getUTCDateString(latestCandle.time * 1000);
 
-            // Check if the most recent candle corresponds to today (UTC)
-            const isLastCandleToday = (
-                lastCandleDate.getUTCFullYear() === now.getUTCFullYear() &&
-                lastCandleDate.getUTCMonth() === now.getUTCMonth() &&
-                lastCandleDate.getUTCDate() === now.getUTCDate()
-            );
+            // If the latest candle in the chart is dated TODAY, then today's candle is actively forming,
+            // so the previous completed daily candle is at index (length - 2).
+            // Otherwise (e.g. weekends/closed market), the latest candle is ALREADY the completed previous daily candle (length - 1).
+            const targetCandle = (latestCandleStr === todayStr)
+                ? sortedCandles[sortedCandles.length - 2]
+                : sortedCandles[sortedCandles.length - 1];
 
-            // If last candle is today's active candle, previous day's closed candle is at index length - 2.
-            // Otherwise (e.g. market closed on weekend), lastCandle (length - 1) is the previous closed day's candle.
-            const prevDailyCandle = isLastCandleToday ? candles[candles.length - 2] : lastCandle;
-            const prevDailyClose = prevDailyCandle.close;
+            const prevDailyClose = targetCandle.close;
 
             console.log(`\n${symbol} PREVIOUS DAILY CLOSE`);
+            console.log(`Target Candle Date (UTC): ${getUTCDateString(targetCandle.time * 1000)}`);
             console.log(`Previous Daily Close Price: ${prevDailyClose}`);
             await writeToSheet(row, prevDailyClose);
 
@@ -113,26 +121,24 @@ async function processSymbol(symbol, row) {
             resolve();
         });
 
-        // Fallback timeout in case of slow websocket updates
+        // Fallback timeout in case of slow socket update
         setTimeout(async () => {
             if (!finished) {
                 finished = true;
                 console.log(`\n${symbol} CHART TIMEOUT`);
 
                 if (chart.periods && chart.periods.length >= 2) {
-                    const candles = chart.periods;
-                    const lastCandle = candles[candles.length - 1];
-                    const now = new Date();
-                    const lastCandleDate = new Date(lastCandle.time * 1000);
+                    const sortedCandles = [...chart.periods].sort((a, b) => a.time - b.time);
+                    const latestCandle = sortedCandles[sortedCandles.length - 1];
 
-                    const isLastCandleToday = (
-                        lastCandleDate.getUTCFullYear() === now.getUTCFullYear() &&
-                        lastCandleDate.getUTCMonth() === now.getUTCMonth() &&
-                        lastCandleDate.getUTCDate() === now.getUTCDate()
-                    );
+                    const todayStr = getUTCDateString(Date.now());
+                    const latestCandleStr = getUTCDateString(latestCandle.time * 1000);
 
-                    const prevDailyCandle = isLastCandleToday ? candles[candles.length - 2] : lastCandle;
-                    const prevDailyClose = prevDailyCandle.close;
+                    const targetCandle = (latestCandleStr === todayStr)
+                        ? sortedCandles[sortedCandles.length - 2]
+                        : sortedCandles[sortedCandles.length - 1];
+
+                    const prevDailyClose = targetCandle.close;
 
                     console.log(`Using Fallback Previous Daily Close Price: ${prevDailyClose}`);
                     await writeToSheet(row, prevDailyClose);
