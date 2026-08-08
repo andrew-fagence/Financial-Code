@@ -79,19 +79,32 @@ async function processSymbol(symbol, row) {
         // TradingView Watchlists use real-time Quote data (not Chart data) to calculate daily Chg and Chg%.
         // By fetching the Last Price (lp) and Change (ch), we can flawlessly reconstruct the baseline.
         const quote = new client.Session.Quote({ fields: ['lp', 'ch', 'prev_close_price'] });
-        quote.setMarkets([symbol]);
+
+        if (typeof quote.setFields === 'function') {
+            quote.setFields(['lp', 'ch', 'prev_close_price']);
+        }
+
+        if (typeof quote.setMarket === 'function') {
+            quote.setMarket(symbol);
+        } else if (typeof quote.addMarket === 'function') {
+            quote.addMarket(symbol);
+        }
 
         const quoteData = {};
 
-        quote.on('data', async (data) => {
+        const handleData = async (data) => {
             if (finished) return;
             
             // Ensure we are catching data for the right symbol
-            if (data.symbol !== symbol) return;
+            if (data && data.symbol && data.symbol !== symbol) return;
 
             // Accumulate incoming payload properties
-            if (data.update) {
-                Object.assign(quoteData, data.update);
+            if (data) {
+                if (data.update) {
+                    Object.assign(quoteData, data.update);
+                } else {
+                    Object.assign(quoteData, data);
+                }
             }
 
             // The absolute exact starting point for daily change % on the Watchlist is lp - ch.
@@ -116,7 +129,14 @@ async function processSymbol(symbol, row) {
                 else if (typeof quote.close === 'function') quote.close();
                 resolve();
             }
-        });
+        };
+
+        if (typeof quote.onData === 'function') {
+            quote.onData(handleData);
+        }
+        if (typeof quote.on === 'function') {
+            quote.on('data', handleData);
+        }
 
         // Fallback in case of a slow/closed market without complete updates
         setTimeout(async () => {
