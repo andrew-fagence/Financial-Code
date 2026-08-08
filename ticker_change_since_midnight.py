@@ -97,23 +97,14 @@ async function processSymbol(symbol, row) {
             finished = true;
 
             // Sort candles chronologically by timestamp ascending
+            // sortedCandles[length - 1] = Current active/live daily candle
+            // sortedCandles[length - 2] = Previous completed daily candle (Close price = Previous Day Close)
             const sortedCandles = [...chart.periods].sort((a, b) => a.time - b.time);
-            const latestCandle = sortedCandles[sortedCandles.length - 1];
-
-            const todayStr = getUTCDateString(Date.now());
-            const latestCandleStr = getUTCDateString(latestCandle.time * 1000);
-
-            // If the latest candle in the chart is dated TODAY, then today's candle is actively forming,
-            // so the previous completed daily candle is at index (length - 2).
-            // Otherwise (e.g. weekends/closed market), the latest candle is ALREADY the completed previous daily candle (length - 1).
-            const targetCandle = (latestCandleStr === todayStr)
-                ? sortedCandles[sortedCandles.length - 2]
-                : sortedCandles[sortedCandles.length - 1];
-
-            const prevDailyClose = targetCandle.close;
+            const prevDailyCandle = sortedCandles[sortedCandles.length - 2];
+            const prevDailyClose = prevDailyCandle.close;
 
             console.log(`\n${symbol} PREVIOUS DAILY CLOSE`);
-            console.log(`Target Candle Date (UTC): ${getUTCDateString(targetCandle.time * 1000)}`);
+            console.log(`Previous Daily Candle Date (UTC): ${getUTCDateString(prevDailyCandle.time * 1000)}`);
             console.log(`Previous Daily Close Price: ${prevDailyClose}`);
             await writeToSheet(row, prevDailyClose);
 
@@ -121,7 +112,7 @@ async function processSymbol(symbol, row) {
             resolve();
         });
 
-        // Fallback timeout in case of slow socket update
+        // Fallback timeout in case of slow websocket update
         setTimeout(async () => {
             if (!finished) {
                 finished = true;
@@ -129,16 +120,8 @@ async function processSymbol(symbol, row) {
 
                 if (chart.periods && chart.periods.length >= 2) {
                     const sortedCandles = [...chart.periods].sort((a, b) => a.time - b.time);
-                    const latestCandle = sortedCandles[sortedCandles.length - 1];
-
-                    const todayStr = getUTCDateString(Date.now());
-                    const latestCandleStr = getUTCDateString(latestCandle.time * 1000);
-
-                    const targetCandle = (latestCandleStr === todayStr)
-                        ? sortedCandles[sortedCandles.length - 2]
-                        : sortedCandles[sortedCandles.length - 1];
-
-                    const prevDailyClose = targetCandle.close;
+                    const prevDailyCandle = sortedCandles[sortedCandles.length - 2];
+                    const prevDailyClose = prevDailyCandle.close;
 
                     console.log(`Using Fallback Previous Daily Close Price: ${prevDailyClose}`);
                     await writeToSheet(row, prevDailyClose);
