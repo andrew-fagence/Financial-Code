@@ -76,13 +76,8 @@ async function processSymbol(symbol, row) {
 
         let finished = false;
         
-        // TradingView Watchlists use real-time Quote data (not Chart data) to calculate daily Chg and Chg%.
-        // By fetching the Last Price (lp) and Change (ch), we can flawlessly reconstruct the baseline.
-        const quote = new client.Session.Quote({ fields: ['lp', 'ch', 'prev_close_price'] });
-
-        if (typeof quote.setFields === 'function') {
-            quote.setFields(['lp', 'ch', 'prev_close_price']);
-        }
+        // Use 'all' fields to ensure the library returns the fully mapped properties
+        const quote = new client.Session.Quote({ fields: 'all' });
 
         if (typeof quote.setMarket === 'function') {
             quote.setMarket(symbol);
@@ -107,11 +102,15 @@ async function processSymbol(symbol, row) {
                 }
             }
 
-            // The absolute exact starting point for daily change % on the Watchlist is lp - ch.
+            // @mathieuc/tradingview automatically maps 'lp' -> 'price' and 'ch' -> 'change'
+            let currentPrice = quoteData.price !== undefined ? quoteData.price : quoteData.lp;
+            let currentChange = quoteData.change !== undefined ? quoteData.change : quoteData.ch;
+            
             let startingPrice = quoteData.prev_close_price;
             
-            if (quoteData.lp !== undefined && quoteData.ch !== undefined) {
-                startingPrice = quoteData.lp - quoteData.ch;
+            // The absolute exact starting point for daily change % on the Watchlist is (price - change).
+            if (currentPrice !== undefined && currentChange !== undefined) {
+                startingPrice = currentPrice - currentChange;
                 // Fix standard JavaScript floating-point artifacts (e.g. 0.8565699999999 becomes 0.85657)
                 startingPrice = parseFloat(startingPrice.toFixed(8));
             }
@@ -120,7 +119,7 @@ async function processSymbol(symbol, row) {
             if (startingPrice !== undefined && startingPrice !== null && !isNaN(startingPrice)) {
                 finished = true;
                 console.log(`\n${symbol} TRADINGVIEW WATCHLIST STARTING POINT`);
-                console.log(`Last Price: ${quoteData.lp} | Change: ${quoteData.ch}`);
+                console.log(`Last Price: ${currentPrice} | Change: ${currentChange}`);
                 console.log(`Calculated Daily Base Price: ${startingPrice}`);
                 await writeToSheet(row, startingPrice);
                 
@@ -144,9 +143,12 @@ async function processSymbol(symbol, row) {
                 finished = true;
                 console.log(`\n${symbol} TRADINGVIEW QUOTE TIMEOUT`);
                 
+                let currentPrice = quoteData.price !== undefined ? quoteData.price : quoteData.lp;
+                let currentChange = quoteData.change !== undefined ? quoteData.change : quoteData.ch;
+                
                 let fallback = quoteData.prev_close_price;
-                if (quoteData.lp !== undefined && quoteData.ch !== undefined) {
-                    fallback = parseFloat((quoteData.lp - quoteData.ch).toFixed(8));
+                if (currentPrice !== undefined && currentChange !== undefined) {
+                    fallback = parseFloat((currentPrice - currentChange).toFixed(8));
                 }
 
                 if (fallback !== undefined && fallback !== null && !isNaN(fallback)) {
