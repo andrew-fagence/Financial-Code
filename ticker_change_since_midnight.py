@@ -4,8 +4,8 @@ def main():
     print("Installing Node.js dependencies...")
     subprocess.run(["npm", "install", "@mathieuc/tradingview", "googleapis"], check=True)
 
-    # We use a raw string (r"") to write the JavaScript file exactly as you wrote it
-    # Note: 'keyFile' has been updated to match the dynamically generated GitHub Secret file.
+    # We use a raw string (r"") to write the JavaScript file exactly as configured
+    # Note: 'keyFile' uses 'gcp_credentials.json' from your GitHub Secret configuration.
     js_code = r"""
 const TradingView = require('@mathieuc/tradingview');
 const { google } = require('googleapis');
@@ -41,7 +41,7 @@ const configs = [
 // =====================================================
 
 const auth = new google.auth.GoogleAuth({
-    keyFile: 'gcp_credentials.json', // Updated to pull from GitHub Actions Secret
+    keyFile: 'gcp_credentials.json',
     scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 
@@ -51,17 +51,17 @@ const spreadsheetId = '1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU';
 // WRITE TO SHEET
 // =====================================================
 
-async function writeToSheet(row, midnightPrice) {
+async function writeToSheet(row, price) {
     const sheets = google.sheets({ version: 'v4', auth });
 
     await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: `Sheet1!M${row}`,
         valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[midnightPrice]] }
+        requestBody: { values: [[price]] }
     });
 
-    console.log(`Google Sheets updated for row ${row} with price: ${midnightPrice}`);
+    console.log(`Google Sheets updated for row ${row} with price: ${price}`);
 }
 
 // =====================================================
@@ -75,91 +75,76 @@ async function processSymbol(symbol, row) {
         console.log(`================================`);
 
         let finished = false;
-        
-        // Use 'all' fields to ensure the library returns the fully mapped properties
-        const quote = new client.Session.Quote({ fields: 'all' });
+        const chart = new client.Session.Chart();
 
-        if (typeof quote.setMarket === 'function') {
-            quote.setMarket(symbol);
-        } else if (typeof quote.addMarket === 'function') {
-            quote.addMarket(symbol);
-        }
+        chart.setMarket(symbol, { timeframe: '1D' });
 
-        const quoteData = {};
-
-        const handleData = async (data) => {
+        chart.onUpdate(async () => {
             if (finished) return;
-            
-            // Ensure we are catching data for the right symbol
-            if (data && data.symbol && data.symbol !== symbol) return;
 
-            // Accumulate incoming payload properties
-            if (data) {
-                if (data.update) {
-                    Object.assign(quoteData, data.update);
-                } else {
-                    Object.assign(quoteData, data);
-                }
-            }
+            // Wait until historical daily candles are loaded
+            if (!chart.periods || chart.periods.length < 2) return;
 
-            // @mathieuc/tradingview automatically maps 'lp' -> 'price' and 'ch' -> 'change'
-            let currentPrice = quoteData.price !== undefined ? quoteData.price : quoteData.lp;
-            let currentChange = quoteData.change !== undefined ? quoteData.change : quoteData.ch;
-            
-            let startingPrice = quoteData.prev_close_price;
-            
-            // The absolute exact starting point for daily change % on the Watchlist is (price - change).
-            if (currentPrice !== undefined && currentChange !== undefined) {
-                startingPrice = currentPrice - currentChange;
-                // Fix standard JavaScript floating-point artifacts (e.g. 0.8565699999999 becomes 0.85657)
-                startingPrice = parseFloat(startingPrice.toFixed(8));
-            }
+            finished = true;
 
-            // Once we secure the starting price, log it and send it to the spreadsheet
-            if (startingPrice !== undefined && startingPrice !== null && !isNaN(startingPrice)) {
-                finished = true;
-                console.log(`\n${symbol} TRADINGVIEW WATCHLIST STARTING POINT`);
-                console.log(`Last Price: ${currentPrice} | Change: ${currentChange}`);
-                console.log(`Calculated Daily Base Price: ${startingPrice}`);
-                await writeToSheet(row, startingPrice);
-                
-                // Cleanup
-                if (typeof quote.delete === 'function') quote.delete();
-                else if (typeof quote.close === 'function') quote.close();
-                resolve();
-            }
-        };
+            const candles = chart.periods;
+            const lastCandle = candles[candles.length - 1];
 
-        if (typeof quote.onData === 'function') {
-            quote.onData(handleData);
-        }
-        if (typeof quote.on === 'function') {
-            quote.on('data', handleData);
-        }
+            const now = new Date();
+            const lastCandleDate = new Date(lastCandle.time * 1000);
 
-        // Fallback in case of a slow/closed market without complete updates
+            // Check if the most recent candle corresponds to today (UTC)
+            const isLastCandleToday = (
+                lastCandleDate.getUTCFullYear() === now.getUTCFullYear() &&
+                lastCandleDate.getUTCMonth() === now.getUTCMonth() &&
+                lastCandleDate.getUTCDate() === now.getUTCDate()
+            );
+
+            // If last candle is today's active candle, previous day's closed candle is at index length - 2.
+            // Otherwise (e.g. market closed on weekend), lastCandle (length - 1) is the previous closed day's candle.
+            const prevDailyCandle = isLastCandleToday ? candles[candles.length - 2] : lastCandle;
+            const prevDailyClose = prevDailyCandle.close;
+
+            console.log(`\n${symbol} PREVIOUS DAILY CLOSE`);
+            console.log(`Previous Daily Close Price: ${prevDailyClose}`);
+            await writeToSheet(row, prevDailyClose);
+
+            if (typeof chart.delete === 'function') chart.delete();
+            resolve();
+        });
+
+        // Fallback timeout in case of slow websocket updates
         setTimeout(async () => {
             if (!finished) {
                 finished = true;
-                console.log(`\n${symbol} TRADINGVIEW QUOTE TIMEOUT`);
-                
-                let currentPrice = quoteData.price !== undefined ? quoteData.price : quoteData.lp;
-                let currentChange = quoteData.change !== undefined ? quoteData.change : quoteData.ch;
-                
-                let fallback = quoteData.prev_close_price;
-                if (currentPrice !== undefined && currentChange !== undefined) {
-                    fallback = parseFloat((currentPrice - currentChange).toFixed(8));
-                }
+                console.log(`\n${symbol} CHART TIMEOUT`);
 
-                if (fallback !== undefined && fallback !== null && !isNaN(fallback)) {
-                    console.log(`Using Fallback Base Price: ${fallback}`);
-                    await writeToSheet(row, fallback);
+                if (chart.periods && chart.periods.length >= 2) {
+                    const candles = chart.periods;
+                    const lastCandle = candles[candles.length - 1];
+                    const now = new Date();
+                    const lastCandleDate = new Date(lastCandle.time * 1000);
+
+                    const isLastCandleToday = (
+                        lastCandleDate.getUTCFullYear() === now.getUTCFullYear() &&
+                        lastCandleDate.getUTCMonth() === now.getUTCMonth() &&
+                        lastCandleDate.getUTCDate() === now.getUTCDate()
+                    );
+
+                    const prevDailyCandle = isLastCandleToday ? candles[candles.length - 2] : lastCandle;
+                    const prevDailyClose = prevDailyCandle.close;
+
+                    console.log(`Using Fallback Previous Daily Close Price: ${prevDailyClose}`);
+                    await writeToSheet(row, prevDailyClose);
+                } else if (chart.periods && chart.periods.length === 1) {
+                    const prevDailyClose = chart.periods[0].close;
+                    console.log(`Using Fallback Daily Close Price: ${prevDailyClose}`);
+                    await writeToSheet(row, prevDailyClose);
                 } else {
-                    console.log(`No valid quote data found for ${symbol}. Market might be fully closed.`);
+                    console.log(`No valid chart data found for ${symbol}.`);
                 }
 
-                if (typeof quote.delete === 'function') quote.delete();
-                else if (typeof quote.close === 'function') quote.close();
+                if (typeof chart.delete === 'function') chart.delete();
                 resolve();
             }
         }, 8000);
@@ -178,7 +163,8 @@ async function processSymbol(symbol, row) {
     console.log('\nALL SYMBOLS COMPLETE');
 })();
 """
-    # Write the script to an isolated temporary file to avoid overriding your existing bot.js
+
+    # Write the script to an isolated temporary file to execute
     with open("temp_bot_runner.js", "w") as f:
         f.write(js_code)
 
