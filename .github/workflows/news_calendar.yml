@@ -2,7 +2,7 @@ name: Weekly News Calendar Run
 
 on:
   schedule:
-    # Runs at 00:05 every Monday.
+    # Runs at 00:05 every morning.
     - cron: '5 0 * * *'
   workflow_dispatch: # Allows manual run inside the Actions UI
 
