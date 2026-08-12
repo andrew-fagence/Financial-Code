@@ -1,4 +1,4 @@
-name: Weekly News Calendar Run
+name: Daily News Calendar Run
 
 on:
   schedule:
