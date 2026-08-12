@@ -7,3 +7,7 @@ fear-and-greed
 yfinance
 pandas
 numpy
+python-dateutil
+beautifulsoup4
+seleniumbase
+sbvirtualdisplay
