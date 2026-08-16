@@ -474,8 +474,7 @@ if __name__ == "__main__":
     ]
 
     ensure_config_file(max_tweets=70)
-    patch_scraper_source()
     clean_and_move_cookies()
-    success = scrape_all_accounts(accounts)
+    success = scrape_all_accounts(accounts, max_tweets=70)  # Pass max_tweets here
     if success:
         update_google_sheet_with_tweets(accounts)
