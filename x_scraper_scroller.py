@@ -121,6 +121,7 @@ def clean_and_move_cookies():
         return False
 
 def patch_scraper_source():
+    import re
     file_path = "./x-scraper/src/playwright_scraper.py"
     if not os.path.exists(file_path):
         print(f"Scraper file not found at {file_path}. Skipping patch.")
@@ -147,7 +148,6 @@ def patch_scraper_source():
         patched_code = patched_code.replace("span:has-text('Log in')", "span:has-text('Log in'), span:has-text('Continue'), span:has-text('Sign in')")
 
         # 2. Patch Tweet __typename Visibility Wrapper (Fixes the 0 tweets issue)
-        # Allows the scraper to parse tweets wrapped in the new Visibility wrapper
         patched_code = patched_code.replace(
             "if tweet_type == 'Tweet':", 
             "if tweet_type in ('Tweet', 'TweetWithVisibilityResults'):\n                if tweet_type == 'TweetWithVisibilityResults':\n                    tweet_obj = tweet_obj.get('tweet', tweet_obj)"
@@ -157,18 +157,20 @@ def patch_scraper_source():
             'if tweet_result.get("__typename") in ["Tweet", "TweetWithVisibilityResults"]:\n            if tweet_result.get("__typename") == "TweetWithVisibilityResults":\n                tweet_result = tweet_result.get("tweet", tweet_result)'
         )
 
-        # 3. Inject a JSON debugger just in case Twitter completely rewrote the payload
-        # This will print the raw GraphQL data into your GitHub Actions console so you know EXACTLY what keys to look for.
-        debug_injection = """
-        logger.error("   Check the debug logs for skipped entry IDs")
-        try:
-            import json
-            logger.error("=== RAW TWEET JSON DUMP (First 1000 chars) ===")
-            logger.error(json.dumps(entries[0])[:1000] if 'entries' in locals() and entries else "No entries found.")
-        except Exception as e:
-            pass
-        """
-        patched_code = patched_code.replace('logger.error("   Check the debug logs for skipped entry IDs")', debug_injection)
+        # 3. Safely Inject JSON Debugger (Fixes the SyntaxError and maintains exact formatting)
+        match = re.search(r'([ \t]*)self\.logger\.error\("   Check the debug logs for skipped entry IDs"\)', patched_code)
+        if match:
+            indent = match.group(1)
+            debug_injection = (
+                f'self.logger.error("   Check the debug logs for skipped entry IDs")\n'
+                f'{indent}try:\n'
+                f'{indent}    import json\n'
+                f'{indent}    self.logger.error("=== RAW TWEET JSON DUMP (First 1000 chars) ===")\n'
+                f'{indent}    self.logger.error(json.dumps(entries[0])[:1000] if "entries" in locals() and entries else "No entries found.")\n'
+                f'{indent}except Exception as e:\n'
+                f'{indent}    pass'
+            )
+            patched_code = patched_code.replace(match.group(0), debug_injection)
 
         if patched_code != code:
             with open(file_path, 'w', encoding='utf-8') as f:
