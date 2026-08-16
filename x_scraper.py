@@ -215,7 +215,6 @@ def format_twitter_date(iso_str):
 
 def run():
     with sync_playwright() as p:
-        # Crucial args to prevent rendering freeze in GitHub Actions
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -241,16 +240,24 @@ def run():
         page.add_init_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
         
         print(f"Navigating to https://x.com/{username}...")
-        page.goto(f"https://x.com/{username}", wait_until="load", timeout=60000)
+        try:
+            page.goto(f"https://x.com/{username}", wait_until="load", timeout=60000)
+        except Exception as e:
+            print(f"Initial navigation warning: {e}")
+            
         page.wait_for_timeout(5000)
         
-        if page.locator('button:has-text("Retry"), button:has-text("Reload")').count() > 0:
+        retry_btns = page.locator('button:has-text("Retry"), button:has-text("Reload")')
+        if retry_btns.count() > 0:
             print("Retry/Reload button found. Clicking it...")
-            page.locator('button:has-text("Retry"), button:has-text("Reload")').first.click(timeout=5000)
+            try:
+                retry_btns.first.click(timeout=5000, force=True)
+            except Exception:
+                pass
             page.wait_for_timeout(8000)
             
         try:
-            page.wait_for_selector('article[data-testid="tweet"]', timeout=5000)
+            page.wait_for_selector('article', timeout=5000)
         except Exception:
             pass
             
@@ -261,7 +268,7 @@ def run():
             needs_login = True
         elif page.locator('a[href*="/login"]').is_visible():
             needs_login = True
-        elif page.locator('article[data-testid="tweet"]').count() == 0:
+        elif page.locator('article').count() == 0:
             needs_login = True
             
         if needs_login:
@@ -270,8 +277,12 @@ def run():
                 page.goto("https://x.com/i/flow/login", wait_until="load", timeout=60000)
                 page.wait_for_timeout(10000)
                 
-                if page.locator('button:has-text("Retry"), button:has-text("Reload")').count() > 0:
-                    page.locator('button:has-text("Retry"), button:has-text("Reload")').first.click(timeout=5000)
+                retry_btns_login = page.locator('button:has-text("Retry"), button:has-text("Reload")')
+                if retry_btns_login.count() > 0:
+                    try:
+                        retry_btns_login.first.click(timeout=5000, force=True)
+                    except Exception:
+                        pass
                     page.wait_for_timeout(8000)
                 
                 if "home" not in page.url.lower():
@@ -280,24 +291,25 @@ def run():
                         uname_input.first.wait_for(state="visible", timeout=20000)
                         uname_input.first.fill(os.environ.get("TWITTER_USERNAME", ""))
                         
-                        next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next")')
-                        next_btn.first.click(timeout=5000)
+                        try:
+                            next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next")')
+                            next_btn.first.click(timeout=5000, force=True)
+                        except Exception:
+                            uname_input.first.press("Enter")
                         page.wait_for_timeout(5000)
                     except Exception as e:
                         print(f"Username input failed: {e}")
-                        try:
-                            # Safely extract any failure messaging on screen
-                            print("Page text snippet:", page.locator("body").inner_text()[:300].replace(chr(10), ' '))
-                        except Exception:
-                            pass
                     
                     try:
                         email_input = page.locator('input[data-testid="ocfEnterTextTextInput"]')
                         email_input.first.wait_for(state="visible", timeout=5000)
                         email_input.first.fill(os.environ.get("TWITTER_EMAIL", ""))
                         
-                        next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next")')
-                        next_btn.first.click(timeout=5000)
+                        try:
+                            next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next")')
+                            next_btn.first.click(timeout=5000, force=True)
+                        except Exception:
+                            email_input.first.press("Enter")
                         page.wait_for_timeout(5000)
                     except Exception:
                         pass
@@ -307,8 +319,11 @@ def run():
                         pwd_input.first.wait_for(state="visible", timeout=15000)
                         pwd_input.first.fill(os.environ.get("TWITTER_PASSWORD", ""))
                         
-                        login_btn = page.locator('[data-testid="LoginForm_Login_Button"], button:has-text("Log in")')
-                        login_btn.first.click(timeout=5000)
+                        try:
+                            login_btn = page.locator('[data-testid="LoginForm_Login_Button"], button:has-text("Log in")')
+                            login_btn.first.click(timeout=5000, force=True)
+                        except Exception:
+                            pwd_input.first.press("Enter")
                         page.wait_for_timeout(10000)
                     except Exception as e:
                         print(f"Password input failed: {e}")
@@ -323,13 +338,17 @@ def run():
             except Exception as e:
                 print(f"Login failed: {e}")
         
-        if page.locator('button:has-text("Retry"), button:has-text("Reload")').count() > 0:
+        retry_btns_final = page.locator('button:has-text("Retry"), button:has-text("Reload")')
+        if retry_btns_final.count() > 0:
             print("Retry button found, clicking it...")
-            page.locator('button:has-text("Retry"), button:has-text("Reload")').first.click(timeout=5000)
+            try:
+                retry_btns_final.first.click(timeout=5000, force=True)
+            except Exception:
+                pass
             page.wait_for_timeout(8000)
             
         try:
-            page.wait_for_selector('article[data-testid="tweet"]', timeout=15000)
+            page.wait_for_selector('article', timeout=15000)
         except Exception:
             print("No tweets loaded after waiting.")
             try:
@@ -342,11 +361,14 @@ def run():
         
         for _ in range(30):
             page.wait_for_timeout(3000)
-            articles = page.locator('article[data-testid="tweet"]').all()
+            articles = page.locator('article').all()
             
             for article in articles:
                 try:
                     text_loc = article.locator('[data-testid="tweetText"]')
+                    if text_loc.count() == 0:
+                        text_loc = article.locator('div[lang]')
+                        
                     if text_loc.count() > 0:
                         text = text_loc.nth(0).inner_text()
                     else:
@@ -375,7 +397,7 @@ def run():
             if len(tweets) >= max_limit:
                 break
                 
-            page.mouse.wheel(0, 2000)
+            page.evaluate("window.scrollBy(0, 2000);")
             
         out_path = f"{data_dir}/tweets_{username}.json"
         with open(out_path, "w", encoding="utf-8") as f:
