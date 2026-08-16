@@ -126,30 +126,54 @@ def patch_scraper_source():
         print(f"Scraper file not found at {file_path}. Skipping patch.")
         return False
 
-    print(f"Patching {file_path} to make authentication selectors more robust...")
+    print(f"Patching {file_path} to make authentication selectors and API parsing more robust...")
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             code = f.read()
 
         patched_code = code
+        
+        # 1. Existing Authentication Patches
         original_username = 'input[autocomplete="username"]'
         robust_username = 'input[autocomplete="username"], input[name="text"], input[placeholder*="username" i], input[placeholder*="Email" i]'
 
         patched_code = patched_code.replace(f'"{original_username}"', f'"{robust_username}"')
         patched_code = patched_code.replace(f"'{original_username}'", f"'{robust_username}'")
-
         patched_code = patched_code.replace('"text=Next"', '"text=/Next|Continue/i"')
         patched_code = patched_code.replace("'text=Next'", "'text=/Next|Continue/i'")
         patched_code = patched_code.replace('span:has-text("Next")', 'span:has-text("Next"), span:has-text("Continue")')
         patched_code = patched_code.replace("span:has-text('Next')", "span:has-text('Next'), span:has-text('Continue')")
-
         patched_code = patched_code.replace('span:has-text("Log in")', 'span:has-text("Log in"), span:has-text("Continue"), span:has-text("Sign in")')
         patched_code = patched_code.replace("span:has-text('Log in')", "span:has-text('Log in'), span:has-text('Continue'), span:has-text('Sign in')")
+
+        # 2. Patch Tweet __typename Visibility Wrapper (Fixes the 0 tweets issue)
+        # Allows the scraper to parse tweets wrapped in the new Visibility wrapper
+        patched_code = patched_code.replace(
+            "if tweet_type == 'Tweet':", 
+            "if tweet_type in ('Tweet', 'TweetWithVisibilityResults'):\n                if tweet_type == 'TweetWithVisibilityResults':\n                    tweet_obj = tweet_obj.get('tweet', tweet_obj)"
+        )
+        patched_code = patched_code.replace(
+            'if tweet_result.get("__typename") == "Tweet":',
+            'if tweet_result.get("__typename") in ["Tweet", "TweetWithVisibilityResults"]:\n            if tweet_result.get("__typename") == "TweetWithVisibilityResults":\n                tweet_result = tweet_result.get("tweet", tweet_result)'
+        )
+
+        # 3. Inject a JSON debugger just in case Twitter completely rewrote the payload
+        # This will print the raw GraphQL data into your GitHub Actions console so you know EXACTLY what keys to look for.
+        debug_injection = """
+        logger.error("   Check the debug logs for skipped entry IDs")
+        try:
+            import json
+            logger.error("=== RAW TWEET JSON DUMP (First 1000 chars) ===")
+            logger.error(json.dumps(entries[0])[:1000] if 'entries' in locals() and entries else "No entries found.")
+        except Exception as e:
+            pass
+        """
+        patched_code = patched_code.replace('logger.error("   Check the debug logs for skipped entry IDs")', debug_injection)
 
         if patched_code != code:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(patched_code)
-            print("Successfully patched playwright_scraper.py!")
+            print("Successfully patched playwright_scraper.py for auth & parsing!")
             return True
         else:
             print("playwright_scraper.py is already up to date.")
