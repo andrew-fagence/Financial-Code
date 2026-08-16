@@ -228,6 +228,7 @@ def run():
         page = context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
+        print(f"Navigating to https://x.com/{username}...")
         page.goto(f"https://x.com/{username}", wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
         
@@ -250,32 +251,38 @@ def run():
             print("Login indicators detected or no tweets found. Attempting to log in...")
             try:
                 page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded")
-                page.wait_for_timeout(5000)
                 
                 if "home" not in page.url.lower():
-                    uname_input = page.locator('input[autocomplete="username"]')
-                    if uname_input.count() > 0:
-                        uname_input.first.fill(os.environ.get("TWITTER_USERNAME", ""))
-                        next_btn = page.locator('button, [role="button"]').filter(has_text=re.compile(r"^(Next|Continue)$", re.IGNORECASE))
-                        if next_btn.count() > 0:
-                            next_btn.first.click()
-                        page.wait_for_timeout(3000)
-                    
-                    email_input = page.locator('input[data-testid="ocfEnterTextTextInput"]')
-                    if email_input.count() > 0:
-                        email_input.first.fill(os.environ.get("TWITTER_EMAIL", ""))
-                        next_btn = page.locator('button, [role="button"]').filter(has_text=re.compile(r"^(Next|Continue)$", re.IGNORECASE))
-                        if next_btn.count() > 0:
-                            next_btn.first.click()
-                        page.wait_for_timeout(3000)
+                    try:
+                        uname_input = page.locator('input[autocomplete="username"], input[name="text"]')
+                        uname_input.first.fill(os.environ.get("TWITTER_USERNAME", ""), timeout=10000)
                         
-                    pwd_input = page.locator('input[name="password"]')
-                    if pwd_input.count() > 0:
-                        pwd_input.first.fill(os.environ.get("TWITTER_PASSWORD", ""))
-                        login_btn = page.locator('[data-testid="LoginForm_Login_Button"]')
-                        if login_btn.count() > 0:
-                            login_btn.first.click()
+                        next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next"), [role="button"]:has-text("Continue")')
+                        next_btn.first.click(timeout=5000)
+                        page.wait_for_timeout(3000)
+                    except Exception as e:
+                        print(f"Username input failed: {e}")
+                    
+                    try:
+                        email_input = page.locator('input[data-testid="ocfEnterTextTextInput"]')
+                        email_input.first.wait_for(state="visible", timeout=4000)
+                        email_input.first.fill(os.environ.get("TWITTER_EMAIL", ""))
+                        
+                        next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next"), [role="button"]:has-text("Continue")')
+                        next_btn.first.click(timeout=5000)
+                        page.wait_for_timeout(3000)
+                    except Exception:
+                        pass # Valid outcome: Interstitial simply wasn't requested
+                        
+                    try:
+                        pwd_input = page.locator('input[name="password"]')
+                        pwd_input.first.fill(os.environ.get("TWITTER_PASSWORD", ""), timeout=5000)
+                        
+                        login_btn = page.locator('[data-testid="LoginForm_Login_Button"], button:has-text("Log in")')
+                        login_btn.first.click(timeout=5000)
                         page.wait_for_timeout(5000)
+                    except Exception as e:
+                        print(f"Password input failed: {e}")
                     
                     context.storage_state(path=cookie_file)
                     print("Login flow completed, cookies saved.")
@@ -286,6 +293,17 @@ def run():
                 page.wait_for_timeout(5000)
             except Exception as e:
                 print(f"Login failed: {e}")
+        
+        retry_btn = page.locator('button:has-text("Retry")')
+        if retry_btn.count() > 0:
+            print("Retry button found, clicking it...")
+            retry_btn.first.click(timeout=5000)
+            page.wait_for_timeout(5000)
+            
+        try:
+            page.wait_for_selector('article[data-testid="tweet"]', timeout=10000)
+        except Exception:
+            print("No tweets loaded after waiting.")
         
         tweets = []
         seen = set()
