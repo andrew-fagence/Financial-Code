@@ -122,6 +122,7 @@ def clean_and_move_cookies():
 
 def patch_scraper_source():
     import re
+    import os
     file_path = "./x-scraper/src/playwright_scraper.py"
     if not os.path.exists(file_path):
         print(f"Scraper file not found at {file_path}. Skipping patch.")
@@ -157,12 +158,13 @@ def patch_scraper_source():
             'if tweet_result.get("__typename") in ["Tweet", "TweetWithVisibilityResults"]:\n            if tweet_result.get("__typename") == "TweetWithVisibilityResults":\n                tweet_result = tweet_result.get("tweet", tweet_result)'
         )
 
-        # 3. Safely Inject JSON Debugger (Fixes the SyntaxError and maintains exact formatting)
+        # 3. Safely Inject JSON Debugger
+        # FIXED: Added `{indent}` to the very first line so Python indentation matches perfectly
         match = re.search(r'([ \t]*)self\.logger\.error\("   Check the debug logs for skipped entry IDs"\)', patched_code)
         if match:
             indent = match.group(1)
             debug_injection = (
-                f'self.logger.error("   Check the debug logs for skipped entry IDs")\n'
+                f'{indent}self.logger.error("   Check the debug logs for skipped entry IDs")\n'
                 f'{indent}try:\n'
                 f'{indent}    import json\n'
                 f'{indent}    self.logger.error("=== RAW TWEET JSON DUMP (First 1000 chars) ===")\n'
