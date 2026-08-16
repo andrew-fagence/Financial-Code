@@ -159,7 +159,6 @@ def patch_scraper_source():
         )
 
         # 3. Safely Inject JSON Debugger
-        # FIXED: Added `{indent}` to the very first line so Python indentation matches perfectly
         match = re.search(r'([ \t]*)self\.logger\.error\("   Check the debug logs for skipped entry IDs"\)', patched_code)
         if match:
             indent = match.group(1)
@@ -195,6 +194,7 @@ import json
 import time
 import os
 import datetime
+import re
 from playwright.sync_api import sync_playwright
 
 username = sys.argv[1]
@@ -211,15 +211,77 @@ def format_twitter_date(iso_str):
 
 def run():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
         cookie_file = "playwright_cookies.json"
+        
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        
         if os.path.exists(cookie_file):
-            context = browser.new_context(storage_state=cookie_file)
+            context = browser.new_context(storage_state=cookie_file, user_agent=user_agent, viewport={'width': 1920, 'height': 1080})
         else:
-            context = browser.new_context()
+            context = browser.new_context(user_agent=user_agent, viewport={'width': 1920, 'height': 1080})
             
         page = context.new_page()
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
         page.goto(f"https://x.com/{username}", wait_until="domcontentloaded")
+        page.wait_for_timeout(5000)
+        
+        try:
+            page.wait_for_selector('article[data-testid="tweet"]', timeout=5000)
+        except Exception:
+            pass
+            
+        needs_login = False
+        if "login" in page.url.lower():
+            needs_login = True
+        elif page.locator('[data-testid="loginButton"]').is_visible():
+            needs_login = True
+        elif page.locator('a[href*="/login"]').is_visible():
+            needs_login = True
+        elif page.locator('article[data-testid="tweet"]').count() == 0:
+            needs_login = True
+            
+        if needs_login:
+            print("Login indicators detected or no tweets found. Attempting to log in...")
+            try:
+                page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded")
+                page.wait_for_timeout(5000)
+                
+                if "home" not in page.url.lower():
+                    uname_input = page.locator('input[autocomplete="username"]')
+                    if uname_input.count() > 0:
+                        uname_input.first.fill(os.environ.get("TWITTER_USERNAME", ""))
+                        next_btn = page.locator('button, [role="button"]').filter(has_text=re.compile(r"^(Next|Continue)$", re.IGNORECASE))
+                        if next_btn.count() > 0:
+                            next_btn.first.click()
+                        page.wait_for_timeout(3000)
+                    
+                    email_input = page.locator('input[data-testid="ocfEnterTextTextInput"]')
+                    if email_input.count() > 0:
+                        email_input.first.fill(os.environ.get("TWITTER_EMAIL", ""))
+                        next_btn = page.locator('button, [role="button"]').filter(has_text=re.compile(r"^(Next|Continue)$", re.IGNORECASE))
+                        if next_btn.count() > 0:
+                            next_btn.first.click()
+                        page.wait_for_timeout(3000)
+                        
+                    pwd_input = page.locator('input[name="password"]')
+                    if pwd_input.count() > 0:
+                        pwd_input.first.fill(os.environ.get("TWITTER_PASSWORD", ""))
+                        login_btn = page.locator('[data-testid="LoginForm_Login_Button"]')
+                        if login_btn.count() > 0:
+                            login_btn.first.click()
+                        page.wait_for_timeout(5000)
+                    
+                    context.storage_state(path=cookie_file)
+                    print("Login flow completed, cookies saved.")
+                else:
+                    print("Already logged in. Returning to profile.")
+                
+                page.goto(f"https://x.com/{username}", wait_until="domcontentloaded")
+                page.wait_for_timeout(5000)
+            except Exception as e:
+                print(f"Login failed: {e}")
         
         tweets = []
         seen = set()
@@ -485,6 +547,7 @@ if __name__ == "__main__":
 
     ensure_config_file(max_tweets=15)
     clean_and_move_cookies()
-    success = scrape_all_accounts(accounts, max_tweets=15) # Pass max_tweets here
+    patch_scraper_source() # Safely applied to cover all bases
+    success = scrape_all_accounts(accounts, max_tweets=15) 
     if success:
         update_google_sheet_with_tweets(accounts)
