@@ -186,21 +186,110 @@ def patch_scraper_source():
         print(f"Failed to patch source code: {e}")
         return False
 
-def scrape_all_accounts(accounts):
+def scrape_all_accounts(accounts, max_tweets=70):
     success_count = 0
+    
+    # Dynamically generate a native DOM Playwright scraper to bypass broken GraphQL
+    custom_scraper_code = """import sys
+import json
+import time
+import os
+import datetime
+from playwright.sync_api import sync_playwright
+
+username = sys.argv[1]
+max_limit = int(sys.argv[2])
+data_dir = f"./data/{username}"
+os.makedirs(data_dir, exist_ok=True)
+
+def format_twitter_date(iso_str):
+    try:
+        dt = datetime.datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+        return dt.strftime("%a %b %d %H:%M:%S +0000 %Y")
+    except Exception:
+        return iso_str
+
+def run():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        cookie_file = "playwright_cookies.json"
+        if os.path.exists(cookie_file):
+            context = browser.new_context(storage_state=cookie_file)
+        else:
+            context = browser.new_context()
+            
+        page = context.new_page()
+        page.goto(f"https://x.com/{username}", wait_until="domcontentloaded")
+        
+        tweets = []
+        seen = set()
+        
+        for _ in range(30):
+            page.wait_for_timeout(3000)
+            articles = page.locator('article[data-testid="tweet"]').all()
+            
+            for article in articles:
+                try:
+                    text_loc = article.locator('[data-testid="tweetText"]')
+                    if text_loc.count() > 0:
+                        text = text_loc.nth(0).inner_text()
+                    else:
+                        continue
+                        
+                    time_el = article.locator('time')
+                    if time_el.count() > 0:
+                        iso_time = time_el.nth(0).get_attribute('datetime')
+                        created_at = format_twitter_date(iso_time)
+                    else:
+                        created_at = datetime.datetime.utcnow().strftime("%a %b %d %H:%M:%S +0000 %Y")
+                        
+                    if text not in seen:
+                        seen.add(text)
+                        tweets.append({
+                            "text": text,
+                            "created_at": created_at,
+                            "author": username
+                        })
+                except Exception:
+                    continue
+                    
+                if len(tweets) >= max_limit:
+                    break
+                    
+            if len(tweets) >= max_limit:
+                break
+                
+            page.mouse.wheel(0, 2000)
+            
+        out_path = f"{data_dir}/tweets_{username}.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump({"tweets": tweets[:max_limit]}, f, indent=4)
+            
+        print(f"Custom Scraper: Successfully saved {len(tweets[:max_limit])} tweets to {out_path}")
+        browser.close()
+
+if __name__ == "__main__":
+    run()
+"""
+    # Save the custom script inside the environment
+    with open("./x-scraper/custom_scraper.py", "w", encoding="utf-8") as f:
+        f.write(custom_scraper_code)
+
     for acc in accounts:
         username = acc["username"]
-        print(f"Starting X-Scraper for {username}...\n")
+        print(f"Starting Custom DOM Scraper for {username}...\n")
         print(f"--- SCRAPER LOGS FOR {username} START ---")
 
+        # Run our custom script instead of main.py
         cmd = [
             "xvfb-run",
             "--auto-servernum",
             "uv",
             "run",
-            "main.py",
-            "user",
-            "--username", username
+            "python",
+            "custom_scraper.py",
+            username,
+            str(max_tweets)
         ]
 
         env = os.environ.copy()
