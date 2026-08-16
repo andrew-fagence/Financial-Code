@@ -252,8 +252,9 @@ def run():
                 pass
             page.wait_for_timeout(8000)
             
+        tweet_selector = 'article[data-testid="tweet"]'
         try:
-            page.wait_for_selector('article', timeout=5000)
+            page.wait_for_selector(tweet_selector, timeout=8000)
         except Exception:
             pass
             
@@ -264,7 +265,7 @@ def run():
             needs_login = True
         elif page.locator('a[href*="/login"]').is_visible():
             needs_login = True
-        elif page.locator('article').count() == 0:
+        elif page.locator(tweet_selector).count() == 0:
             needs_login = True
             
         if needs_login:
@@ -344,7 +345,7 @@ def run():
             page.wait_for_timeout(8000)
             
         try:
-            page.wait_for_selector('article', timeout=15000)
+            page.wait_for_selector(tweet_selector, timeout=15000)
         except Exception:
             print("No tweets loaded after waiting.")
             try:
@@ -357,7 +358,7 @@ def run():
         
         for _ in range(30):
             page.wait_for_timeout(3000)
-            articles = page.locator('article').all()
+            articles = page.locator(tweet_selector).all()
             
             for article in articles:
                 try:
