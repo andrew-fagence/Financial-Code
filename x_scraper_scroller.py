@@ -121,318 +121,175 @@ def clean_and_move_cookies():
         return False
 
 def patch_scraper_source():
-    import re
-    import os
-    file_path = "./x-scraper/src/playwright_scraper.py"
+    """
+    Patches playwright_scraper.py with the ULTIMATE Network Interceptor.
+    Bypasses all endpoint name checks and scans ALL network traffic for tweets.
+    """
+    file_path = "/content/x-scraper/src/playwright_scraper.py"
     if not os.path.exists(file_path):
         print(f"Scraper file not found at {file_path}. Skipping patch.")
         return False
 
-    print(f"Patching {file_path} to make authentication selectors and API parsing more robust...")
+    print(f"Injecting ULTIMATE Interceptor and Diagnostics into {file_path}...")
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             code = f.read()
 
-        patched_code = code
+        # --- 1. UI SELECTOR PATCHES ---
+        code = code.replace('input[autocomplete="username"]', 'input[autocomplete="username"], input[name="text"], input[placeholder*="username" i], input[placeholder*="Email" i]')
+        code = code.replace('"text=Next"', '"text=/Next|Continue/i"')
+        code = code.replace("'text=Next'", "'text=/Next|Continue/i'")
+        code = code.replace('span:has-text("Next")', 'span:has-text("Next"), span:has-text("Continue")')
+        code = code.replace("span:has-text('Next')", "span:has-text('Next'), span:has-text('Continue')")
+        code = code.replace('span:has-text("Log in")', 'span:has-text("Log in"), span:has-text("Continue"), span:has-text("Sign in")')
+        code = code.replace("span:has-text('Log in')", "span:has-text('Log in'), span:has-text('Continue'), span:has-text('Sign in')")
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(code)
+
+        # --- 2. THE OMNI-INTERCEPTOR MONKEY PATCH ---
+        monkey_patch = """
+# --- THE ULTIMATE INTERCEPTOR PATCH ---
+import time
+import json
+from typing import Dict, Any, Optional
+
+def _recursive_find(obj, key):
+    if isinstance(obj, dict):
+        if key in obj: return obj
+        for k, v in obj.items():
+            res = _recursive_find(v, key)
+            if res: return res
+    elif isinstance(obj, list):
+        for item in obj:
+            res = _recursive_find(item, key)
+            if res: return res
+    return None
+
+async def ultimate_intercept_response(self, response):
+    # 1. Run the original interceptor so we don't break existing dependencies
+    if hasattr(self, '_original_intercept_response'):
+        await self._original_intercept_response(response)
         
-        # 1. Existing Authentication Patches
-        original_username = 'input[autocomplete="username"]'
-        robust_username = 'input[autocomplete="username"], input[name="text"], input[placeholder*="username" i], input[placeholder*="Email" i]'
+    try:
+        url = response.url
+        # Catch ALL Twitter API traffic, regardless of endpoint name
+        if 'graphql' in url.lower() or 'api.twitter.com' in url or 'api.x.com' in url:
+            if response.request.resource_type in ["xhr", "fetch"]:
+                try:
+                    data = await response.json()
+                    
+                    # --- DIAGNOSTICS: Catch hidden Twitter bans/rate limits ---
+                    if isinstance(data, dict):
+                        if 'errors' in data:
+                            self.logger.error(f"🚨 TWITTER API ERROR from {url.split('/')[-1].split('?')[0]}: {data['errors']}")
+                        elif data.get('data', {}).get('user', {}).get('result', {}).get('__typename') == 'UserUnavailable':
+                            self.logger.error(f"🚨 TWITTER ACCOUNT BANNED OR UNAVAILABLE: {data}")
+                    
+                    # --- AGGRESSIVE TWEET EXTRACTION ---
+                    tweets_found = 0
+                    def extract_tweets_recursively(obj):
+                        nonlocal tweets_found
+                        if isinstance(obj, dict):
+                            # A valid tweet object always contains a 'legacy' dict with 'full_text'
+                            if 'legacy' in obj and isinstance(obj['legacy'], dict) and 'full_text' in obj['legacy']:
+                                legacy = obj['legacy']
+                                tweet_id = legacy.get('id_str') or obj.get('rest_id')
+                                
+                                if not hasattr(self, 'scraped_tweet_ids'): self.scraped_tweet_ids = set()
+                                if not hasattr(self, 'all_tweets'): self.all_tweets = []
+                                
+                                if tweet_id and tweet_id not in self.scraped_tweet_ids:
+                                    user_info = _recursive_find(obj, 'screen_name') or {}
+                                    
+                                    tweet_data = {
+                                        'id': tweet_id,
+                                        'text': legacy.get('full_text', ''),
+                                        'full_text': legacy.get('full_text', ''),
+                                        'created_at': legacy.get('created_at', ''),
+                                        'user': {
+                                            'id': user_info.get('id_str', ''),
+                                            'username': user_info.get('screen_name', 'financialjuice'),
+                                            'display_name': user_info.get('name', 'FinancialJuice'),
+                                        },
+                                        'metrics': {},
+                                        'lang': legacy.get('lang', 'en'),
+                                        'hashtags': [],
+                                        'urls': [],
+                                        'media': [],
+                                        'scraped_at': time.time()
+                                    }
+                                    
+                                    self.all_tweets.append(tweet_data)
+                                    self.scraped_tweet_ids.add(tweet_id)
+                                    tweets_found += 1
+                                    
+                            for k, v in obj.items():
+                                extract_tweets_recursively(v)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                extract_tweets_recursively(item)
 
-        patched_code = patched_code.replace(f'"{original_username}"', f'"{robust_username}"')
-        patched_code = patched_code.replace(f"'{original_username}'", f"'{robust_username}'")
-        patched_code = patched_code.replace('"text=Next"', '"text=/Next|Continue/i"')
-        patched_code = patched_code.replace("'text=Next'", "'text=/Next|Continue/i'")
-        patched_code = patched_code.replace('span:has-text("Next")', 'span:has-text("Next"), span:has-text("Continue")')
-        patched_code = patched_code.replace("span:has-text('Next')", "span:has-text('Next'), span:has-text('Continue')")
-        patched_code = patched_code.replace('span:has-text("Log in")', 'span:has-text("Log in"), span:has-text("Continue"), span:has-text("Sign in")')
-        patched_code = patched_code.replace("span:has-text('Log in')", "span:has-text('Log in'), span:has-text('Continue'), span:has-text('Sign in')")
+                    extract_tweets_recursively(data)
+                    
+                    if tweets_found > 0:
+                        endpoint = url.split('/')[-1].split('?')[0]
+                        self.logger.info(f"🔥 BINGO! Extracted {tweets_found} tweets directly from {endpoint}")
+                        
+                except Exception as e:
+                    pass
+    except Exception as e:
+        pass
 
-        # 2. Patch Tweet __typename Visibility Wrapper (Fixes the 0 tweets issue)
-        patched_code = patched_code.replace(
-            "if tweet_type == 'Tweet':", 
-            "if tweet_type in ('Tweet', 'TweetWithVisibilityResults'):\n                if tweet_type == 'TweetWithVisibilityResults':\n                    tweet_obj = tweet_obj.get('tweet', tweet_obj)"
-        )
-        patched_code = patched_code.replace(
-            'if tweet_result.get("__typename") == "Tweet":',
-            'if tweet_result.get("__typename") in ["Tweet", "TweetWithVisibilityResults"]:\n            if tweet_result.get("__typename") == "TweetWithVisibilityResults":\n                tweet_result = tweet_result.get("tweet", tweet_result)'
-        )
+# Dynamically apply the Omni-Interceptor at runtime
+for obj_name, obj in list(locals().items()):
+    if isinstance(obj, type) and hasattr(obj, '_intercept_response'):
+        if not hasattr(obj, '_original_intercept_response'):
+            obj._original_intercept_response = obj._intercept_response
+        obj._intercept_response = ultimate_intercept_response
+"""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            current_code = f.read()
 
-        # 3. Safely Inject JSON Debugger
-        match = re.search(r'([ \t]*)self\.logger\.error\("   Check the debug logs for skipped entry IDs"\)', patched_code)
-        if match:
-            indent = match.group(1)
-            debug_injection = (
-                f'{indent}self.logger.error("   Check the debug logs for skipped entry IDs")\n'
-                f'{indent}try:\n'
-                f'{indent}    import json\n'
-                f'{indent}    self.logger.error("=== RAW TWEET JSON DUMP (First 1000 chars) ===")\n'
-                f'{indent}    self.logger.error(json.dumps(entries[0])[:1000] if "entries" in locals() and entries else "No entries found.")\n'
-                f'{indent}except Exception as e:\n'
-                f'{indent}    pass'
-            )
-            patched_code = patched_code.replace(match.group(0), debug_injection)
+        if "THE ULTIMATE INTERCEPTOR PATCH" not in current_code:
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write("\n" + monkey_patch)
+            print("Successfully injected the Ultimate Interceptor monkey-patch!")
 
-        if patched_code != code:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(patched_code)
-            print("Successfully patched playwright_scraper.py for auth & parsing!")
-            return True
-        else:
-            print("playwright_scraper.py is already up to date.")
-            return False
+        return True
     except Exception as e:
         print(f"Failed to patch source code: {e}")
         return False
 
-def scrape_all_accounts(accounts, max_tweets=70):
+def scrape_all_accounts(accounts):
+    print("Ensuring virtual display dependencies are installed...")
+    # Install xvfb cleanly if it isn't already present in the environment
+    subprocess.run(["apt-get", "install", "-y", "xvfb"], capture_output=True)
+
     success_count = 0
-    
-    # Dynamically generate a native DOM Playwright scraper to bypass broken GraphQL
-    custom_scraper_code = """import sys
-import json
-import time
-import os
-import datetime
-import re
-from playwright.sync_api import sync_playwright
-
-username = sys.argv[1]
-max_limit = int(sys.argv[2])
-data_dir = f"./data/{username}"
-os.makedirs(data_dir, exist_ok=True)
-
-def format_twitter_date(iso_str):
-    try:
-        dt = datetime.datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
-        return dt.strftime("%a %b %d %H:%M:%S +0000 %Y")
-    except Exception:
-        return iso_str
-
-def run():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--window-size=1920,1080",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
-            ]
-        )
-        cookie_file = "playwright_cookies.json"
-        
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        
-        if os.path.exists(cookie_file):
-            context = browser.new_context(storage_state=cookie_file, user_agent=user_agent, viewport={'width': 1920, 'height': 1080})
-        else:
-            context = browser.new_context(user_agent=user_agent, viewport={'width': 1920, 'height': 1080})
-            
-        page = context.new_page()
-        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        page.add_init_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
-        
-        print(f"Navigating to https://x.com/{username}...")
-        try:
-            page.goto(f"https://x.com/{username}", wait_until="load", timeout=60000)
-        except Exception as e:
-            print(f"Initial navigation warning: {e}")
-            
-        page.wait_for_timeout(5000)
-        
-        retry_btns = page.locator('button:has-text("Retry"), button:has-text("Reload")')
-        if retry_btns.count() > 0:
-            print("Retry/Reload button found. Clicking it...")
-            try:
-                retry_btns.first.click(timeout=5000, force=True)
-            except Exception:
-                pass
-            page.wait_for_timeout(8000)
-            
-        tweet_selector = 'article[data-testid="tweet"]'
-        try:
-            page.wait_for_selector(tweet_selector, timeout=8000)
-        except Exception:
-            pass
-            
-        needs_login = False
-        if "login" in page.url.lower():
-            needs_login = True
-        elif page.locator('[data-testid="loginButton"]').is_visible():
-            needs_login = True
-        elif page.locator('a[href*="/login"]').is_visible():
-            needs_login = True
-        elif page.locator(tweet_selector).count() == 0:
-            needs_login = True
-            
-        if needs_login:
-            print("Login indicators detected or no tweets found. Attempting to log in...")
-            try:
-                page.goto("https://x.com/i/flow/login", wait_until="load", timeout=60000)
-                page.wait_for_timeout(10000)
-                
-                retry_btns_login = page.locator('button:has-text("Retry"), button:has-text("Reload")')
-                if retry_btns_login.count() > 0:
-                    try:
-                        retry_btns_login.first.click(timeout=5000, force=True)
-                    except Exception:
-                        pass
-                    page.wait_for_timeout(8000)
-                
-                if "home" not in page.url.lower():
-                    try:
-                        uname_input = page.locator('input[autocomplete="username"], input[name="text"], input[type="text"]')
-                        uname_input.first.wait_for(state="visible", timeout=20000)
-                        uname_input.first.fill(os.environ.get("TWITTER_USERNAME", ""))
-                        
-                        try:
-                            next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next")')
-                            next_btn.first.click(timeout=5000, force=True)
-                        except Exception:
-                            uname_input.first.press("Enter")
-                        page.wait_for_timeout(5000)
-                    except Exception as e:
-                        print(f"Username input failed: {e}")
-                    
-                    try:
-                        email_input = page.locator('input[data-testid="ocfEnterTextTextInput"]')
-                        email_input.first.wait_for(state="visible", timeout=5000)
-                        email_input.first.fill(os.environ.get("TWITTER_EMAIL", ""))
-                        
-                        try:
-                            next_btn = page.locator('button:has-text("Next"), button:has-text("Continue"), [role="button"]:has-text("Next")')
-                            next_btn.first.click(timeout=5000, force=True)
-                        except Exception:
-                            email_input.first.press("Enter")
-                        page.wait_for_timeout(5000)
-                    except Exception:
-                        pass
-                        
-                    try:
-                        pwd_input = page.locator('input[name="password"]')
-                        pwd_input.first.wait_for(state="visible", timeout=15000)
-                        pwd_input.first.fill(os.environ.get("TWITTER_PASSWORD", ""))
-                        
-                        try:
-                            login_btn = page.locator('[data-testid="LoginForm_Login_Button"], button:has-text("Log in")')
-                            login_btn.first.click(timeout=5000, force=True)
-                        except Exception:
-                            pwd_input.first.press("Enter")
-                        page.wait_for_timeout(10000)
-                    except Exception as e:
-                        print(f"Password input failed: {e}")
-                    
-                    context.storage_state(path=cookie_file)
-                    print("Login flow completed, cookies saved.")
-                else:
-                    print("Already logged in. Returning to profile.")
-                
-                page.goto(f"https://x.com/{username}", wait_until="load", timeout=60000)
-                page.wait_for_timeout(8000)
-            except Exception as e:
-                print(f"Login failed: {e}")
-        
-        retry_btns_final = page.locator('button:has-text("Retry"), button:has-text("Reload")')
-        if retry_btns_final.count() > 0:
-            print("Retry button found, clicking it...")
-            try:
-                retry_btns_final.first.click(timeout=5000, force=True)
-            except Exception:
-                pass
-            page.wait_for_timeout(8000)
-            
-        try:
-            page.wait_for_selector(tweet_selector, timeout=15000)
-        except Exception:
-            print("No tweets loaded after waiting.")
-            try:
-                print("Final page text snippet:", page.locator("body").inner_text()[:300].replace(chr(10), ' '))
-            except Exception:
-                pass
-        
-        tweets = []
-        seen = set()
-        
-        for _ in range(30):
-            page.wait_for_timeout(3000)
-            articles = page.locator(tweet_selector).all()
-            
-            for article in articles:
-                try:
-                    text_loc = article.locator('[data-testid="tweetText"]')
-                    if text_loc.count() == 0:
-                        text_loc = article.locator('div[lang]')
-                        
-                    if text_loc.count() > 0:
-                        text = text_loc.nth(0).inner_text()
-                    else:
-                        continue
-                        
-                    time_el = article.locator('time')
-                    if time_el.count() > 0:
-                        iso_time = time_el.nth(0).get_attribute('datetime')
-                        created_at = format_twitter_date(iso_time)
-                    else:
-                        created_at = datetime.datetime.utcnow().strftime("%a %b %d %H:%M:%S +0000 %Y")
-                        
-                    if text not in seen:
-                        seen.add(text)
-                        tweets.append({
-                            "text": text,
-                            "created_at": created_at,
-                            "author": username
-                        })
-                except Exception:
-                    continue
-                    
-                if len(tweets) >= max_limit:
-                    break
-                    
-            if len(tweets) >= max_limit:
-                break
-                
-            page.evaluate("window.scrollBy(0, 2000);")
-            
-        out_path = f"{data_dir}/tweets_{username}.json"
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump({"tweets": tweets[:max_limit]}, f, indent=4)
-            
-        print(f"Custom Scraper: Successfully saved {len(tweets[:max_limit])} tweets to {out_path}")
-        browser.close()
-
-if __name__ == "__main__":
-    run()
-"""
-    # Save the custom script inside the environment
-    with open("./x-scraper/custom_scraper.py", "w", encoding="utf-8") as f:
-        f.write(custom_scraper_code)
-
     for acc in accounts:
         username = acc["username"]
-        print(f"Starting Custom DOM Scraper for {username}...\n")
+        print(f"Starting X-Scraper for {username}...\n")
         print(f"--- SCRAPER LOGS FOR {username} START ---")
 
-        # Run our custom script instead of main.py
+        # Prefixing the command with xvfb-run to provide a virtual cloud monitor
         cmd = [
             "xvfb-run",
             "--auto-servernum",
             "uv",
             "run",
-            "python",
-            "custom_scraper.py",
-            username,
-            str(max_tweets)
+            "main.py",
+            "user",
+            "--username", username
         ]
 
+        # Force Python to not buffer the output
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
         result = subprocess.run(
             cmd,
-            cwd="./x-scraper",
+            cwd="/content/x-scraper",
             capture_output=True,
             text=True,
             env=env
