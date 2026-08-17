@@ -125,7 +125,7 @@ def patch_scraper_source():
     Patches playwright_scraper.py with the ULTIMATE Network Interceptor.
     Bypasses all endpoint name checks and scans ALL network traffic for tweets.
     """
-    file_path = "/content/x-scraper/src/playwright_scraper.py"
+    file_path = "./x-scraper/src/playwright_scraper.py"
     if not os.path.exists(file_path):
         print(f"Scraper file not found at {file_path}. Skipping patch.")
         return False
