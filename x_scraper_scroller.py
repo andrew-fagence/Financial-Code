@@ -49,22 +49,31 @@ scroll_delay_max = 5.0
     print("config.ini updated with settings!")
 
 def clean_and_move_cookies():
+    """
+    Finds playwright_cookies.json in the repository directory,
+    cleans legacy or invalid sameSite values (like 'no_restriction', 'unspecified', or null),
+    converts cookie attributes to comply strictly with Playwright's expectations,
+    and saves the cleaned cookies to bypass the login phase.
+    """
     root_path = "./playwright_cookies.json"
     repo_cookies_path = "./x-scraper/playwright_cookies.json"
 
+    # 1. Check if the user uploaded the file to the root folder
     if os.path.exists(root_path):
         print(f"Found cookie file at root: {root_path}. Moving to scraper folder...")
         try:
             shutil.copy2(root_path, repo_cookies_path)
         except Exception as e:
-            print(f"Failed to move cookie file: {e}")
+            print(f"Failed to copy cookie file: {e}")
 
+    # 2. Process and sanitize the cookie file if it exists in the target path
     if os.path.exists(repo_cookies_path):
         print(f"Sanitizing cookies inside {repo_cookies_path} to prevent sameSite validation errors...")
         try:
             with open(repo_cookies_path, 'r', encoding='utf-8') as f:
                 cookies = json.load(f)
 
+            # Wrap in a list if it's a single dictionary
             if isinstance(cookies, dict):
                 cookies = [cookies]
 
@@ -74,13 +83,15 @@ def clean_and_move_cookies():
             for cookie in cookies:
                 cleaned_cookie = {}
 
+                # Copy required fields
                 if 'name' in cookie:
                     cleaned_cookie['name'] = str(cookie['name'])
                 if 'value' in cookie:
                     cleaned_cookie['value'] = str(cookie['value'])
                 else:
-                    continue
+                    continue  # Skip invalid cookies without values
 
+                # Copy standard optional fields
                 if 'domain' in cookie:
                     cleaned_cookie['domain'] = str(cookie['domain'])
                 if 'path' in cookie:
@@ -90,21 +101,26 @@ def clean_and_move_cookies():
                 if 'httpOnly' in cookie:
                     cleaned_cookie['httpOnly'] = bool(cookie['httpOnly'])
 
+                # Handle expires conversion
                 if 'expires' in cookie:
                     cleaned_cookie['expires'] = cookie['expires']
                 elif 'expirationDate' in cookie:
                     cleaned_cookie['expires'] = cookie['expirationDate']
 
+                # Fix sameSite validation strictly
                 if 'sameSite' in cookie:
                     s_val = cookie['sameSite']
                     if s_val is not None:
                         s_str = str(s_val).strip()
-                        s_capitalized = s_str.capitalize()
+                        s_capitalized = s_str.capitalize()  # "lax" -> "Lax", "none" -> "None"
 
                         if s_capitalized in valid_samesite_values:
                             cleaned_cookie['sameSite'] = s_capitalized
                         elif s_str.lower() in ["no_restriction", "unspecified"]:
                             cleaned_cookie['sameSite'] = "None"
+                        else:
+                            # Let Playwright default by omitting the sameSite property completely
+                            pass
 
                 cleaned_cookies.append(cleaned_cookie)
 
@@ -289,7 +305,7 @@ def scrape_all_accounts(accounts):
 
         result = subprocess.run(
             cmd,
-            cwd="/content/x-scraper",
+            cwd="./x-scraper",  # Fixed path to operate relative to GitHub repo root
             capture_output=True,
             text=True,
             env=env
@@ -311,6 +327,10 @@ def scrape_all_accounts(accounts):
     return success_count > 0
 
 def find_scraped_file(username):
+    """
+    Robustly looks for the scraper output file directly for a specific username,
+    then falls back to a recursive search inside the scraper data directory.
+    """
     direct_paths = [
         f"./x-scraper/data/{username}/tweets_{username}.json",
         f"./x-scraper/data/{username.lower()}/tweets_{username.lower()}.json",
@@ -321,7 +341,9 @@ def find_scraped_file(username):
         if os.path.exists(path):
             return path
 
+    # Fallback to recursive search
     list_of_files = glob.glob(f'{DATA_DIR}/**/*.json', recursive=True)
+    # Ignore cookie configurations or other files
     valid_files = [
         f for f in list_of_files
         if username.lower() in os.path.basename(f).lower() and "cookie" not in os.path.basename(f).lower()
@@ -332,11 +354,12 @@ def find_scraped_file(username):
     return None
 
 def update_google_sheet_with_tweets(accounts):
-    all_extracted_tweets = []
+    all_extracted_tweets = []  # Will store tuples of (datetime_object, sanitized_content)
 
     for acc in accounts:
         username = acc["username"]
 
+        # 1. Locate the correct JSON file for the account
         latest_file = find_scraped_file(username)
         if not latest_file:
             print(f"No scraped data found for {username}. Skipping extraction.")
@@ -358,25 +381,33 @@ def update_google_sheet_with_tweets(accounts):
 
         count = 0
         for tweet in tweets:
-            if count >= 5:
+            if count >= 5:  # Restricts output to exactly 5 tweets per account
                 break
             content = tweet.get("text", "").strip()
             if not content:
-                continue
+                continue  # Skip empty messages
 
-            # Sanitization logic
+            # --- DATA SANITIZATION ---
+            # Remove boilerplate prefixes
             content = re.sub(r"^BREAKING:\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"^UPDATE:\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"^EXCLUSIVE:\s*", "", content, flags=re.IGNORECASE)
+            
+            # Remove specific custom phrases
             content = re.sub(r"🔴\s*More on", "", content, flags=re.IGNORECASE)
             content = re.sub(r"🔴\s*LIVE updates:", "", content, flags=re.IGNORECASE)
             content = re.sub(r"Here's what we know\.", "", content, flags=re.IGNORECASE)
+            
+            # Remove the "For more on this and other news visit [URL]" section
             content = re.sub(r"\s*For more on this and other news visit.*$", "", content, flags=re.IGNORECASE)
+            
+            # Remove volume emojis specifically
             content = re.sub(r"🔊", "", content)
             
             # Match the whole sentence containing BOTH "reuters" and "podcast" and remove it completely
             content = re.sub(r"[^.!?\n]*(?:reuters[^.!?\n]*podcast|podcast[^.!?\n]*reuters)[^.!?\n]*[.!?\n]*", "", content, flags=re.IGNORECASE)
             
+            # Remove all URLs (this naturally catches the URLs at the end of the tweet)
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
 
             # Sanitize ALL emojis out of text (including zero-width joiners, skin tones, and keycaps)
@@ -386,26 +417,30 @@ def update_google_sheet_with_tweets(accounts):
                 content
             )
 
+            # Clean up double spaces created by the removals and trim all leading/trailing whitespace
             content = re.sub(r"\s+", " ", content).strip()
 
             if not content:
-                continue
+                continue  # Skip if cleaning left the message completely empty
             
             # Append a full stop only if the content does not end in a full stop (.), exclamation mark (!), or question mark (?)
             if not content.endswith(('.', '!', '?')):
                 content += '.'
 
+            # --- EXTRACT DATE FOR SORTING ---
             date_str = tweet.get("created_at") or tweet.get("date") or ""
             parsed_date = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
             
             if date_str:
                 try:
+                    # Attempt standard Twitter API date parsing
                     dt = parsedate_to_datetime(date_str)
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=datetime.timezone.utc)
                     parsed_date = dt
                 except Exception:
                     try:
+                        # Attempt standard ISO 8601 parsing fallback
                         dt = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=datetime.timezone.utc)
@@ -413,22 +448,28 @@ def update_google_sheet_with_tweets(accounts):
                     except Exception:
                         pass
 
+            # Append as a tuple so we can sort them all globally later
             all_extracted_tweets.append((parsed_date, content))
             count += 1
 
     if not all_extracted_tweets:
-        print("No tweet data was gathered.")
+        print("No tweet data was gathered. Review the Scraper Logs above to see why X blocked the extraction.")
         return
 
+    # Sort the global pool of extracted tweets by Date, newest first (Descending)
     all_extracted_tweets.sort(key=lambda x: x[0], reverse=True)
+
+    # Extract just the sanitized text back into a list format for Google Sheets
     all_rows_to_write = [[t[1]] for t in all_extracted_tweets]
 
+    # 3. Connect and update Google Sheet using oauth2client
     try:
         scope = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"
         ]
 
+        # Use GCP Github Secrets when available
         gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
         if gcp_credentials_json:
             creds_dict = json.loads(gcp_credentials_json)
@@ -439,6 +480,7 @@ def update_google_sheet_with_tweets(accounts):
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(SPREADSHEET_ID)
 
+        # Connect to or create the "News" worksheet
         worksheet = None
         try:
             worksheet = sh.worksheet("News")
@@ -452,13 +494,16 @@ def update_google_sheet_with_tweets(accounts):
         print(f"Writing {len(all_rows_to_write)} records to worksheet '{worksheet.title}'...")
         worksheet.update(range_name='A1', values=all_rows_to_write)
 
-        print("Applying formatting...")
+        # --- Polish spreadsheet layout and formatting ---
+        print("Applying clean table formatting and auto-resizing columns...")
         try:
+            # Enable word wrapping on Column A (the formatted tweet column)
             worksheet.format('A:A', {'wrapStrategy': 'WRAP'})
         except Exception as format_err:
             print(f"Word wrapping failed: {format_err}")
 
         try:
+            # Automatically resize Column A so no text is cut off
             worksheet.columns_auto_resize(0, 1)
         except Exception as resize_err:
             print(f"Auto-resizing failed: {resize_err}")
@@ -469,15 +514,24 @@ def update_google_sheet_with_tweets(accounts):
         print(f"Failed to write to Google Sheet: {e}")
 
 if __name__ == "__main__":
+    # Define the accounts to scrape (exactly 5 tweets each will be displayed, without author prefixes)
     accounts = [
         {"username": "Reuters", "display_name": "Reuters"},
         {"username": "AP", "display_name": "The Associated Press"},
         {"username": "AJENews", "display_name": "Al Jazeera Breaking News"}
     ]
 
+    # Generate config.ini for the scraper using environment variables
     ensure_config_file(max_tweets=15)
+    
+    # 1. Ensure codebase is patched to support multiple modal designs and "Continue" buttons
+    patch_scraper_source()
+
+    # 2. Automatically clean, structure, and sanitize user cookies before scraping runs
     clean_and_move_cookies()
-    patch_scraper_source() # Safely applied to cover all bases
-    success = scrape_all_accounts(accounts, max_tweets=15) 
+
+    # 3. Execute the scraping process for all targeted accounts
+    success = scrape_all_accounts(accounts)
+    
     if success:
         update_google_sheet_with_tweets(accounts)
