@@ -70,43 +70,67 @@ def get_ai_summary(client: genai.Client, bank_name: str, rate: float, outlook_co
         f"Current Forward Outlook Signal: {outlook_context}. "
         "Based on this explicit guidance, write a strict 15-word maximum sentiment summary."
     )
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=prompt
-        )
-        return response.text.strip()
-    except Exception as e:
-        return f"AI generation failed: {e}"
+    
+    for attempt in range(10):
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=prompt
+            )
+            return response.text.strip()
+        except Exception as e:
+            error_msg = str(e)
+            # Checks explicitly for the 503 high demand unavailability error you provided
+            if "503" in error_msg and "UNAVAILABLE" in error_msg and "high demand" in error_msg:
+                if attempt < 9:
+                    print(f"[{bank_name}] Model in high demand (503). Retrying in 5 seconds (Attempt {attempt + 2}/10)...")
+                    time.sleep(5)
+                    continue
+            return f"AI generation failed: {e}"
 
 def update_google_sheets(spreadsheet_id: str, credentials_json_str: str, data: dict):
-    try:
-        print("Connecting to Google Sheets...")
-        # Parses the JSON string from the GitHub Secret directly into a dictionary
-        creds_dict = json.loads(credentials_json_str)
-        gc = gspread.service_account_from_dict(creds_dict)
-        
-        sh = gc.open_by_key(spreadsheet_id)
-        worksheet = sh.get_worksheet(0)
+    for attempt in range(10):
+        try:
+            if attempt == 0:
+                print("Connecting to Google Sheets...")
+            else:
+                print(f"Re-connecting to Google Sheets (Attempt {attempt + 1}/10)...")
 
-        update_payload = [
-            {'range': 'H34', 'values': [[data['fed_rate']]]},
-            {'range': 'H35', 'values': [[data['fed_summary']]]},
-            {'range': 'H36', 'values': [[data['ecb_rate']]]},
-            {'range': 'H37', 'values': [[data['ecb_summary']]]},
-            {'range': 'H38', 'values': [[data['boe_rate']]]},
-            {'range': 'H39', 'values': [[data['boe_summary']]]},
-            {'range': 'K34', 'values': [[data['boj_rate']]]},
-            {'range': 'K35', 'values': [[data['boj_summary']]]}
-        ]
+            # Parses the JSON string from the GitHub Secret directly into a dictionary
+            creds_dict = json.loads(credentials_json_str)
+            gc = gspread.service_account_from_dict(creds_dict)
+            
+            sh = gc.open_by_key(spreadsheet_id)
+            worksheet = sh.get_worksheet(0)
 
-        worksheet.batch_update(update_payload)
-        print("✅ Successfully exported all interest rates and sentiments to Google Sheets!")
+            update_payload = [
+                {'range': 'H34', 'values': [[data['fed_rate']]]},
+                {'range': 'H35', 'values': [[data['fed_summary']]]},
+                {'range': 'H36', 'values': [[data['ecb_rate']]]},
+                {'range': 'H37', 'values': [[data['ecb_summary']]]},
+                {'range': 'H38', 'values': [[data['boe_rate']]]},
+                {'range': 'H39', 'values': [[data['boe_summary']]]},
+                {'range': 'K34', 'values': [[data['boj_rate']]]},
+                {'range': 'K35', 'values': [[data['boj_summary']]]}
+            ]
 
-    except gspread.exceptions.SpreadsheetNotFound:
-        print(f"❌ Error: Spreadsheet ID '{spreadsheet_id}' not found. Verify the ID or check if you shared the sheet with your service account email.")
-    except Exception as e:
-        print(f"❌ Failed to update Google Sheets: {e}")
+            worksheet.batch_update(update_payload)
+            print("✅ Successfully exported all interest rates and sentiments to Google Sheets!")
+            return # Exit function on successful update
+
+        except gspread.exceptions.SpreadsheetNotFound:
+            print(f"❌ Error: Spreadsheet ID '{spreadsheet_id}' not found. Verify the ID or check if you shared the sheet with your service account email.")
+            return # Don't retry, it won't resolve a 404
+        except Exception as e:
+            error_msg = str(e)
+            # Checks explicitly for the 429 Quota Exceeded error you provided
+            if "429" in error_msg and "Quota exceeded" in error_msg:
+                if attempt < 9:
+                    print(f"Google Sheets rate limit exceeded (429). Retrying in 10 seconds (Attempt {attempt + 2}/10)...")
+                    time.sleep(10)
+                    continue
+            print(f"❌ Failed to update Google Sheets: {e}")
+            return # Exit if max retries hit or different error occurs
 
 if __name__ == "__main__":
     # --- FETCH SECRETS FROM GITHUB ACTIONS ENVIRONMENT ---
