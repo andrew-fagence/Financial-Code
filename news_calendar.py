@@ -3,6 +3,7 @@ import json
 import re
 import dateutil.parser
 import pytz
+import time
 
 from sbvirtualdisplay import Display
 from seleniumbase import Driver
@@ -177,44 +178,58 @@ def update_forex_calendar():
             print(f"Event {idx}: {event}")
 
         print("\nUploading results to Google Spreadsheet...")
-        try:
-            scope = [
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.file",
-                "https://www.googleapis.com/auth/drive"
-            ]
-
-            # Reintroduced your original secure environmental variable logic
-            gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
-            if gcp_credentials_json:
-                print("Loading credentials from GCP_CREDENTIALS environment variable...")
-                creds_dict = json.loads(gcp_credentials_json)
-                creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            else:
-                print(f"Loading credentials from fallback file: {SERVICE_ACCOUNT_FILE}")
-                # Resolve potential missing extension logic from the colab block
-                creds_file = SERVICE_ACCOUNT_FILE
-                if not os.path.exists(creds_file) and os.path.exists(creds_file + ".json"):
-                    creds_file = creds_file + ".json"
-                creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
-
-            client = gspread.authorize(creds)
-            sheet = client.open_by_key(SPREADSHEET_ID)
-
+        max_retries = 10
+        for attempt in range(max_retries):
             try:
-                worksheet = sheet.worksheet(SHEET_TAB_NAME)
-            except gspread.exceptions.WorksheetNotFound:
-                worksheet = sheet.add_worksheet(title=SHEET_TAB_NAME, rows=100, cols=6)
+                scope = [
+                    "https://spreadsheets.google.com/feeds",
+                    "https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/drive.file",
+                    "https://www.googleapis.com/auth/drive"
+                ]
 
-            # Clear old content and update using append_rows (compatible with newest gspread)
-            worksheet.clear()
-            worksheet.append_rows(events)
+                # Reintroduced your original secure environmental variable logic
+                gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
+                if gcp_credentials_json:
+                    if attempt == 0:
+                        print("Loading credentials from GCP_CREDENTIALS environment variable...")
+                    creds_dict = json.loads(gcp_credentials_json)
+                    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+                else:
+                    if attempt == 0:
+                        print(f"Loading credentials from fallback file: {SERVICE_ACCOUNT_FILE}")
+                    # Resolve potential missing extension logic from the colab block
+                    creds_file = SERVICE_ACCOUNT_FILE
+                    if not os.path.exists(creds_file) and os.path.exists(creds_file + ".json"):
+                        creds_file = creds_file + ".json"
+                    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
 
-            print("Success! Dashboard spreadsheet has been updated.")
+                client = gspread.authorize(creds)
+                sheet = client.open_by_key(SPREADSHEET_ID)
 
-        except Exception as sheet_err:
-            print(f"Error uploading to Google Spreadsheet: {sheet_err}")
+                try:
+                    worksheet = sheet.worksheet(SHEET_TAB_NAME)
+                except gspread.exceptions.WorksheetNotFound:
+                    worksheet = sheet.add_worksheet(title=SHEET_TAB_NAME, rows=100, cols=6)
+
+                # Clear old content and update using append_rows (compatible with newest gspread)
+                worksheet.clear()
+                worksheet.append_rows(events)
+
+                print("Success! Dashboard spreadsheet has been updated.")
+                break  # Exit the retry loop on success
+
+            except Exception as sheet_err:
+                error_msg = str(sheet_err)
+                if '429' in error_msg or 'rateLimitExceeded' in error_msg or 'Quota exceeded' in error_msg:
+                    if attempt < max_retries - 1:
+                        print(f"Rate limit exceeded (429). Retrying in 10 seconds... (Attempt {attempt + 1} of {max_retries})")
+                        time.sleep(10)
+                    else:
+                        print(f"Error uploading to Google Spreadsheet after {max_retries} attempts: {sheet_err}")
+                else:
+                    print(f"Error uploading to Google Spreadsheet: {sheet_err}")
+                    break  # Break on non-429 errors
     else:
         print("\nNo high impact events could be parsed for this timeframe.")
 
