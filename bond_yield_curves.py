@@ -52,8 +52,13 @@ console.log(
 );
 
 
+const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+if (keyData.private_key) {
+    keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
+}
+
 const auth = new google.auth.GoogleAuth({
-    keyFile: '/content/forexdailybias-5ce3a8ede6c9.json',
+    credentials: keyData,
     scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 
@@ -221,8 +226,13 @@ console.log(
 );
 
 
+const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+if (keyData.private_key) {
+    keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
+}
+
 const auth = new google.auth.GoogleAuth({
-    keyFile: '/content/forexdailybias-5ce3a8ede6c9.json',
+    credentials: keyData,
     scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 
@@ -390,8 +400,13 @@ console.log(
 );
 
 
+const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+if (keyData.private_key) {
+    keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
+}
+
 const auth = new google.auth.GoogleAuth({
-    keyFile: '/content/forexdailybias-5ce3a8ede6c9.json',
+    credentials: keyData,
     scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 
@@ -559,8 +574,13 @@ console.log(
 );
 
 
+const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+if (keyData.private_key) {
+    keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
+}
+
 const auth = new google.auth.GoogleAuth({
-    keyFile: '/content/forexdailybias-5ce3a8ede6c9.json',
+    credentials: keyData,
     scopes: ['https://www.googleapis.com/auth/spreadsheets']
 });
 
