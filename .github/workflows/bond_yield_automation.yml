@@ -1,0 +1,36 @@
+name: Bond Yield Curves Automation
+
+on:
+  repository_dispatch:
+    types: [run_bond_yields]
+  workflow_dispatch: # Allows you to manually click a button to test it
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Prepare Google Credentials
+        run: |
+          # Create the file expected in the working directory
+          echo "${{ secrets.GCP_CREDENTIALS }}" > forexdailybias-5ce3a8ede9c2.json
+          
+          # Recreate the Google Colab /content directory and add the key file there
+          sudo mkdir -p /content
+          echo "${{ secrets.GCP_CREDENTIALS }}" | sudo tee /content/forexdailybias-5ce3a8ede6c9.json > /dev/null
+
+      - name: Run Bond Yield Curves Script
+        run: python bond_yield_curves.py
