@@ -52,7 +52,7 @@ console.log(
 );
 
 
-const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+const keyData = require('./forexdailybias-5ce3a8ede9c2.json');
 if (keyData.private_key) {
     keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
 }
@@ -226,7 +226,7 @@ console.log(
 );
 
 
-const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+const keyData = require('./forexdailybias-5ce3a8ede9c2.json');
 if (keyData.private_key) {
     keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
 }
@@ -400,7 +400,7 @@ console.log(
 );
 
 
-const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+const keyData = require('./forexdailybias-5ce3a8ede9c2.json');
 if (keyData.private_key) {
     keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
 }
@@ -574,7 +574,7 @@ console.log(
 );
 
 
-const keyData = require('/content/forexdailybias-5ce3a8ede6c9.json');
+const keyData = require('./forexdailybias-5ce3a8ede9c2.json');
 if (keyData.private_key) {
     keyData.private_key = keyData.private_key.replace(/\\n/g, '\n');
 }
