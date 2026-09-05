@@ -53,15 +53,35 @@ const spreadsheetId = '1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU';
 
 async function writeToSheet(row, price) {
     const sheets = google.sheets({ version: 'v4', auth });
+    const maxRetries = 10;
+    let attempt = 0;
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `Sheet1!M${row}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[price]] }
-    });
+    while (attempt < maxRetries) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: `Sheet1!M${row}`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: { values: [[price]] }
+            });
 
-    console.log(`Google Sheets updated for row ${row} with price: ${price}`);
+            console.log(`Google Sheets updated for row ${row} with price: ${price}`);
+            return; // Success, exit function
+        } catch (error) {
+            attempt++;
+            console.log(`Error updating Google Sheets for row ${row} (Attempt ${attempt}/${maxRetries}): ${error.message}`);
+            
+            if (attempt >= maxRetries) {
+                console.log(`Max retries reached for row ${row}. Could not update.`);
+                break; // Stop retrying after maximum attempts
+            }
+            
+            // Incremental delay (2s, 4s, 6s...) to allow Google API rate limits to reset
+            const delayMs = attempt * 2000;
+            console.log(`Waiting ${delayMs}ms before retrying...`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
 }
 
 // =====================================================
