@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -67,5 +68,18 @@ sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
 
 print(f"Sending {len(updates)} dynamic updates to Google Sheets...")
-worksheet.batch_update(updates)
-print("✅ Google Spreadsheet successfully updated with live data!")
+
+max_attempts = 10
+for attempt in range(1, max_attempts + 1):
+    try:
+        worksheet.batch_update(updates)
+        print("✅ Google Spreadsheet successfully updated with live data!")
+        break
+    except Exception as e:
+        if "429" in str(e) and attempt < max_attempts:
+            wait_time = 2 ** attempt  # Exponential backoff (2s, 4s, 8s, 16s, etc.)
+            print(f"Rate limit exceeded (429). Retrying in {wait_time} seconds... (Attempt {attempt} of {max_attempts})")
+            time.sleep(wait_time)
+        else:
+            # If it's not a 429 error or we've reached max attempts, raise the actual error
+            raise
