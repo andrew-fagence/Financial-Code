@@ -410,6 +410,9 @@ def update_google_sheet_with_tweets(accounts):
             # Remove all URLs (this naturally catches the URLs at the end of the tweet)
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
 
+            # Remove all hashtags
+            content = re.sub(r"#\w+", "", content)
+
             # Sanitize ALL emojis out of text (including zero-width joiners, skin tones, and keycaps)
             content = re.sub(
                 r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u200d\ufe0f\U0001F1E6-\U0001F1FF\u20e3]",
