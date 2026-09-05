@@ -24,13 +24,12 @@ jobs:
           node-version: '18'
 
       - name: Prepare Google Credentials
+        env:
+          # Passing the secret as an environment variable preserves all double-quotes
+          GCP_CREDS: ${{ secrets.GCP_CREDENTIALS }}
         run: |
-          # Create the file expected in the working directory
-          echo "${{ secrets.GCP_CREDENTIALS }}" > forexdailybias-5ce3a8ede9c2.json
-          
-          # Recreate the Google Colab /content directory and add the key file there
-          sudo mkdir -p /content
-          echo "${{ secrets.GCP_CREDENTIALS }}" | sudo tee /content/forexdailybias-5ce3a8ede6c9.json > /dev/null
+          # Create the file safely in the working directory
+          echo "$GCP_CREDS" > forexdailybias-5ce3a8ede9c2.json
 
       - name: Run Bond Yield Curves Script
         run: python bond_yield_curves.py
