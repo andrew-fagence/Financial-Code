@@ -1,0 +1,30 @@
+name: USA Fundamental Data Automation
+
+on:
+  schedule:
+    # Runs at 00:00 every day UTC. Adjust if you prefer a different time.
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allows you to manually trigger the workflow from the 'Actions' tab
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Create GCP Credentials JSON
+        run: |
+          cat << 'EOF' > forexdailybias-5ce3a8ede6c9.json
+          ${{ secrets.GCP_CREDENTIALS }}
+          EOF
+          
+      - name: Run USA Fundamental Data Script
+        run: |
+          python fundamental_usa_data.py
