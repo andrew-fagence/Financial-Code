@@ -240,9 +240,8 @@ if __name__ == "__main__":
     fred = fa.Fred(FRED_API_KEY)
     
     # ==========================================
-    # INSERTED AUTHENTICATION BLOCK
+    # API AUTHENTICATION
     # ==========================================
-    # install libraries (Using subprocess format since !pip is exclusively for Jupyter cells)
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "google-api-python-client", "google-auth-httplib2", "google-auth-oauthlib", "gspread"], check=True)
     
     import gspread
@@ -252,18 +251,18 @@ if __name__ == "__main__":
         "https://www.googleapis.com/auth/spreadsheets"
     ]
     
-    # get credentials from JSON file
     creds = Credentials.from_service_account_file("forexdailybias-5ce3a8ede6c9.json", scopes=scopes)
     client = gspread.authorize(creds)
     
-    # ID of google sheet workbook
     sheet_id = "1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU"
     sheet = client.open_by_key(sheet_id)
-    wb = sheet.worksheet(SHEET_TAB_NAME) # <-- Maintains connection to worksheet for existing code below
+    wb = sheet.worksheet(SHEET_TAB_NAME)
+    
+    wb.resize(rows=150, cols=50)
     # ==========================================
 
     # -------------------------------------------------------------------------
-    # FRED INDICATORS (Blocks 3 to 10, 14 to 26)
+    # FRED INDICATORS
     # -------------------------------------------------------------------------
 
     series_data = [
@@ -278,10 +277,10 @@ if __name__ == "__main__":
     for ticker, m_row, m_col, q_row, q_col, y_row, y_col in series_data:
         print(f"\nProcessing {ticker}...")
         
-        # Monthly values
-        df = fred.get_series(ticker).to_frame(name="index").dropna()
-        df["yoy"] = df["index"].pct_change(1, fill_method=None) * 100
-        latestm = df.tail(3).reset_index()
+        # Monthly values (Fresh pull)
+        df_m = fred.get_series(ticker).to_frame(name="index").dropna()
+        df_m["yoy"] = df_m["index"].pct_change(1, fill_method=None) * 100
+        latestm = df_m.tail(3).reset_index()
         latestm.columns = ["date", "index", "yoy"]
         for i in range(3):
             datem = latestm.loc[i, "date"].strftime("%Y-%m-%d")
@@ -289,8 +288,9 @@ if __name__ == "__main__":
             wb.update_cell(m_row, (m_col - 1) + (i * 2), datem)
             wb.update_cell(m_row, m_col + (i * 2), mom)
 
-        # Quarterly values
-        quarter_df = df[df.index.month.isin([3, 6, 9, 12])].copy()
+        # Quarterly values (Fresh pull)
+        df_q = fred.get_series(ticker).to_frame(name="index").dropna()
+        quarter_df = df_q[df_q.index.month.isin([3, 6, 9, 12])].copy()
         quarter_df["quarterly"] = quarter_df["index"].pct_change(fill_method=None) * 100
         quarter_df = quarter_df.dropna()
         latestq = quarter_df.tail(3).reset_index()
@@ -301,7 +301,7 @@ if __name__ == "__main__":
             wb.update_cell(q_row, (q_col - 1) + (i * 2), dateq)
             wb.update_cell(q_row, q_col + (i * 2), valueq)
 
-        # Yearly values
+        # Yearly values (Fresh pull)
         df_y = fred.get_series(ticker).to_frame(name="index").dropna()
         df_y["yoy"] = df_y["index"].pct_change(12, fill_method=None) * 100
         df_y = df_y.dropna()
@@ -339,9 +339,9 @@ if __name__ == "__main__":
 
     # Retail Sales
     print("\nProcessing Retail Sales...")
-    df = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
-    df["mom"] = df["level"].pct_change(1) * 100
-    latest = df.dropna().tail(3).reset_index()
+    df_m = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
+    df_m["mom"] = df_m["level"].pct_change(1) * 100
+    latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
@@ -349,8 +349,9 @@ if __name__ == "__main__":
         wb.update_cell(20, 8 + (i * 2), date)
         wb.update_cell(20, 9 + (i * 2), mom)
 
-    last_month = df.index.max()
-    q = df.resample("QE").last()
+    df_q = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
+    last_month = df_q.index.max()
+    q = df_q.resample("QE").last()
     q = q[q.index <= last_month]
     q["qoq"] = q["level"].pct_change() * 100
     latest = q.dropna().tail(3).reset_index()
@@ -361,8 +362,9 @@ if __name__ == "__main__":
         wb.update_cell(25, 8 + (i * 2), date)
         wb.update_cell(25, 9 + (i * 2), qoq)
 
-    df["yoy"] = df["level"].pct_change(12) * 100
-    latest = df.dropna().tail(3).reset_index()
+    df_y = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
+    df_y["yoy"] = df_y["level"].pct_change(12) * 100
+    latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
@@ -372,9 +374,9 @@ if __name__ == "__main__":
 
     # AMTMNO
     print("\nProcessing AMTMNO...")
-    df = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
-    df["mom"] = df["level"].pct_change(fill_method=None) * 100
-    latest = df.dropna().tail(3).reset_index()
+    df_m = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
+    df_m["mom"] = df_m["level"].pct_change(fill_method=None) * 100
+    latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
@@ -382,8 +384,9 @@ if __name__ == "__main__":
         wb.update_cell(20, 26 + (i * 2), date)
         wb.update_cell(20, 27 + (i * 2), mom)
 
-    q = df.resample("QE").last()
-    q = q[q.index <= df.index.max()]
+    df_q = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
+    q = df_q.resample("QE").last()
+    q = q[q.index <= df_q.index.max()]
     q["qoq"] = q["level"].pct_change(fill_method=None) * 100
     latest = q.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "qoq"]
@@ -393,8 +396,9 @@ if __name__ == "__main__":
         wb.update_cell(25, 26 + (i * 2), date)
         wb.update_cell(25, 27 + (i * 2), qoq)
 
-    df["yoy"] = df["level"].pct_change(12) * 100
-    latest = df.dropna().tail(3).reset_index()
+    df_y = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
+    df_y["yoy"] = df_y["level"].pct_change(12) * 100
+    latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
@@ -403,7 +407,6 @@ if __name__ == "__main__":
         wb.update_cell(30, 27 + (i * 2), yoy)
 
     INDSalesGet = fred.get_series('AMTMNO')
-    
     INDSales = INDSalesGet.tail()
     wb.update_cell(20, 32, INDSales.index[2].strftime('%Y-%m-%d'))
     wb.update_cell(20, 33, INDSales.iloc[2])
@@ -430,16 +433,17 @@ if __name__ == "__main__":
 
     # INDPRO
     print("\nProcessing INDPRO...")
-    df = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
-    df["mom"] = df["level"].pct_change(fill_method=None) * 100
-    latest = df.dropna().tail(3).reset_index()
+    df_m = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
+    df_m["mom"] = df_m["level"].pct_change(fill_method=None) * 100
+    latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
     for i in range(len(latest)):
         wb.update_cell(20, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
         wb.update_cell(20, 33 + (i * 2), float(latest.loc[i, "mom"]))
 
-    q = df.resample("QE").last()
-    q = q[q.index <= df.index.max()]
+    df_q = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
+    q = df_q.resample("QE").last()
+    q = q[q.index <= df_q.index.max()]
     q["qoq"] = q["level"].pct_change(fill_method=None) * 100
     latest = q.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "qoq"]
@@ -447,8 +451,9 @@ if __name__ == "__main__":
         wb.update_cell(25, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
         wb.update_cell(25, 33 + (i * 2), float(latest.loc[i, "qoq"]))
 
-    df["yoy"] = df["level"].pct_change(12, fill_method=None) * 100
-    latest = df.dropna().tail(3).reset_index()
+    df_y = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
+    df_y["yoy"] = df_y["level"].pct_change(12, fill_method=None) * 100
+    latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
     for i in range(len(latest)):
         wb.update_cell(30, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
@@ -473,23 +478,24 @@ if __name__ == "__main__":
     
     for ticker, base_col, is_diff in employment_series:
         print(f"\nProcessing {ticker}...")
-        df = fred.get_series(ticker).to_frame(name="level").dropna()
+        df_m = fred.get_series(ticker).to_frame(name="level").dropna()
         if is_diff:
-            df["change"] = df["level"].diff()
-            df = df.dropna()
-            latest = df.tail(3).reset_index()
+            df_m["change"] = df_m["level"].diff()
+            df_m = df_m.dropna()
+            latest = df_m.tail(3).reset_index()
             latest.columns = ["date", "level", "change"]
             for i in range(len(latest)):
                 wb.update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
                 wb.update_cell(114, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'change']):+d}K")
         else:
-            latest = df.tail(3).reset_index()
+            latest = df_m.tail(3).reset_index()
             latest.columns = ["date", "level"]
             for i in range(len(latest)):
                 wb.update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
                 wb.update_cell(114, (base_col + 1) + (i * 2), latest.loc[i, "level"])
         
-        q = df.resample("QE").last().iloc[:-1].dropna()
+        df_q = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
+        q = df_q.resample("QE").last().iloc[:-1].dropna()
         if is_diff:
             q["change"] = q["level"].diff()
             q = q.dropna()
@@ -505,18 +511,18 @@ if __name__ == "__main__":
                 wb.update_cell(119, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
                 wb.update_cell(119, (base_col + 1) + (i * 2), latest.loc[i, "level"])
 
-        df = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
+        df_y = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
         if is_diff:
-            df["yoy_change"] = df["level"].diff(12)
-            df = df.dropna()
-            latest = df.tail(3).reset_index()
+            df_y["yoy_change"] = df_y["level"].diff(12)
+            df_y = df_y.dropna()
+            latest = df_y.tail(3).reset_index()
             latest.columns = ["date", "level", "yoy_change"]
             for i in range(len(latest)):
                 wb.update_cell(124, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
                 wb.update_cell(124, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'yoy_change']):+d}K")
         else:
-            latest_month = df.index[-1].month
-            same_month = df[df.index.month == latest_month]
+            latest_month = df_y.index[-1].month
+            same_month = df_y[df_y.index.month == latest_month]
             latest = same_month.tail(3).reset_index()
             latest.columns = ["date", "level"]
             for i in range(len(latest)):
