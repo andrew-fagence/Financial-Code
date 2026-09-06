@@ -21,6 +21,27 @@ client = None
 wb = None
 
 # =========================
+# RETRY & SLEEP LOGIC WRAPPER
+# =========================
+def safe_update_cell(row, col, val):
+    global wb
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            wb.update_cell(row, col, val)
+            time.sleep(1.2)  # Paces the script to ~50 writes/min to prevent 429 errors
+            return
+        except Exception as e:
+            if '429' in str(e):
+                sleep_time = 5 * (2 ** attempt)
+                print(f"API 429 Quota Exceeded. Sleeping {sleep_time}s before retrying...")
+                time.sleep(sleep_time)
+            else:
+                raise e
+    print(f"Failed to update cell {row}, {col} after {max_retries} retries.")
+
+
+# =========================
 # SYSTEM SETUP (Colab/Linux)
 # =========================
 def setup_environment():
@@ -141,12 +162,12 @@ def scrape_ism_services_history():
         return
 
     global wb
-    wb.update_cell(20, 14, monthly.iloc[0]["Release Date"].strftime("%Y-%m-%d"))
-    wb.update_cell(20, 15, round(monthly.iloc[0]["PMI_%_change"], 2))
-    wb.update_cell(20, 16, monthly.iloc[1]["Release Date"].strftime("%Y-%m-%d"))
-    wb.update_cell(20, 17, round(monthly.iloc[1]["PMI_%_change"], 2))
-    wb.update_cell(20, 18, monthly.iloc[2]["Release Date"].strftime("%Y-%m-%d"))
-    wb.update_cell(20, 19, round(monthly.iloc[2]["PMI_%_change"], 2))
+    safe_update_cell(20, 14, monthly.iloc[0]["Release Date"].strftime("%Y-%m-%d"))
+    safe_update_cell(20, 15, round(monthly.iloc[0]["PMI_%_change"], 2))
+    safe_update_cell(20, 16, monthly.iloc[1]["Release Date"].strftime("%Y-%m-%d"))
+    safe_update_cell(20, 17, round(monthly.iloc[1]["PMI_%_change"], 2))
+    safe_update_cell(20, 18, monthly.iloc[2]["Release Date"].strftime("%Y-%m-%d"))
+    safe_update_cell(20, 19, round(monthly.iloc[2]["PMI_%_change"], 2))
     print(monthly)
     print("US ISM Services PMI % change updated successfully.")
 
@@ -220,12 +241,12 @@ def scrape_ism_manufacturing_history():
         return
 
     global wb
-    wb.update_cell(20, 20, monthly.iloc[0]['Release Date'].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 21, monthly.iloc[0]['Actual'])
-    wb.update_cell(20, 22, monthly.iloc[1]['Release Date'].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 23, monthly.iloc[1]['Actual'])
-    wb.update_cell(20, 24, monthly.iloc[2]['Release Date'].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 25, monthly.iloc[2]['Actual'])
+    safe_update_cell(20, 20, monthly.iloc[0]['Release Date'].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 21, monthly.iloc[0]['Actual'])
+    safe_update_cell(20, 22, monthly.iloc[1]['Release Date'].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 23, monthly.iloc[1]['Actual'])
+    safe_update_cell(20, 24, monthly.iloc[2]['Release Date'].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 25, monthly.iloc[2]['Actual'])
     print("Fixed-cell update complete (Manufacturing PMI).")
 
 
@@ -285,8 +306,8 @@ if __name__ == "__main__":
         for i in range(3):
             datem = latestm.loc[i, "date"].strftime("%Y-%m-%d")
             mom = float(latestm.loc[i, "yoy"])
-            wb.update_cell(m_row, (m_col - 1) + (i * 2), datem)
-            wb.update_cell(m_row, m_col + (i * 2), mom)
+            safe_update_cell(m_row, (m_col - 1) + (i * 2), datem)
+            safe_update_cell(m_row, m_col + (i * 2), mom)
 
         # Quarterly values (Fresh pull)
         df_q = fred.get_series(ticker).to_frame(name="index").dropna()
@@ -298,8 +319,8 @@ if __name__ == "__main__":
         for i in range(3):
             dateq = latestq.loc[i, "date"].strftime("%Y-%m-%d")
             valueq = float(latestq.loc[i, "quarterly"])
-            wb.update_cell(q_row, (q_col - 1) + (i * 2), dateq)
-            wb.update_cell(q_row, q_col + (i * 2), valueq)
+            safe_update_cell(q_row, (q_col - 1) + (i * 2), dateq)
+            safe_update_cell(q_row, q_col + (i * 2), valueq)
 
         # Yearly values (Fresh pull)
         df_y = fred.get_series(ticker).to_frame(name="index").dropna()
@@ -310,8 +331,8 @@ if __name__ == "__main__":
         for i in range(3):
             date = latest.loc[i, "date"].strftime("%Y-%m-%d")
             yoy = float(latest.loc[i, "yoy"])
-            wb.update_cell(y_row, (y_col - 1) + (i * 2), date)
-            wb.update_cell(y_row, y_col + (i * 2), yoy)
+            safe_update_cell(y_row, (y_col - 1) + (i * 2), date)
+            safe_update_cell(y_row, y_col + (i * 2), yoy)
 
     # GDP
     print("\nProcessing GDP...")
@@ -324,8 +345,8 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.index[i].strftime("%Y-%m-%d")
         qoq = float(latest["annualised_qoq"].iloc[i])
-        wb.update_cell(25, 2 + (i * 2), date)
-        wb.update_cell(25, 3 + (i * 2), qoq)
+        safe_update_cell(25, 2 + (i * 2), date)
+        safe_update_cell(25, 3 + (i * 2), qoq)
 
     gdp_y = fred.get_series("GDPC1").to_frame(name="level").dropna().sort_index()
     gdp_y["yoy"] = gdp_y["level"].pct_change(4) * 100
@@ -334,8 +355,8 @@ if __name__ == "__main__":
     for i in range(len(latest_y)):
         date = latest_y.index[i].strftime("%Y-%m-%d")
         yoy = float(latest_y["yoy"].iloc[i])
-        wb.update_cell(30, 2 + (i * 2), date)
-        wb.update_cell(30, 3 + (i * 2), yoy)
+        safe_update_cell(30, 2 + (i * 2), date)
+        safe_update_cell(30, 3 + (i * 2), yoy)
 
     # Retail Sales
     print("\nProcessing Retail Sales...")
@@ -346,8 +367,8 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
         mom = float(latest.loc[i, "mom"])
-        wb.update_cell(20, 8 + (i * 2), date)
-        wb.update_cell(20, 9 + (i * 2), mom)
+        safe_update_cell(20, 8 + (i * 2), date)
+        safe_update_cell(20, 9 + (i * 2), mom)
 
     df_q = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
     last_month = df_q.index.max()
@@ -359,8 +380,8 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
         qoq = float(latest.loc[i, "qoq"])
-        wb.update_cell(25, 8 + (i * 2), date)
-        wb.update_cell(25, 9 + (i * 2), qoq)
+        safe_update_cell(25, 8 + (i * 2), date)
+        safe_update_cell(25, 9 + (i * 2), qoq)
 
     df_y = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
     df_y["yoy"] = df_y["level"].pct_change(12) * 100
@@ -369,8 +390,8 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
         yoy = float(latest.loc[i, "yoy"])
-        wb.update_cell(30, 8 + (i * 2), date)
-        wb.update_cell(30, 9 + (i * 2), yoy)
+        safe_update_cell(30, 8 + (i * 2), date)
+        safe_update_cell(30, 9 + (i * 2), yoy)
 
     # AMTMNO
     print("\nProcessing AMTMNO...")
@@ -381,8 +402,8 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
         mom = float(latest.loc[i, "mom"])
-        wb.update_cell(20, 26 + (i * 2), date)
-        wb.update_cell(20, 27 + (i * 2), mom)
+        safe_update_cell(20, 26 + (i * 2), date)
+        safe_update_cell(20, 27 + (i * 2), mom)
 
     df_q = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
     q = df_q.resample("QE").last()
@@ -393,8 +414,8 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
         qoq = float(latest.loc[i, "qoq"])
-        wb.update_cell(25, 26 + (i * 2), date)
-        wb.update_cell(25, 27 + (i * 2), qoq)
+        safe_update_cell(25, 26 + (i * 2), date)
+        safe_update_cell(25, 27 + (i * 2), qoq)
 
     df_y = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
     df_y["yoy"] = df_y["level"].pct_change(12) * 100
@@ -403,33 +424,33 @@ if __name__ == "__main__":
     for i in range(len(latest)):
         date = latest.loc[i, "date"].strftime("%Y-%m-%d")
         yoy = float(latest.loc[i, "yoy"])
-        wb.update_cell(30, 26 + (i * 2), date)
-        wb.update_cell(30, 27 + (i * 2), yoy)
+        safe_update_cell(30, 26 + (i * 2), date)
+        safe_update_cell(30, 27 + (i * 2), yoy)
 
     INDSalesGet = fred.get_series('AMTMNO')
     INDSales = INDSalesGet.tail()
-    wb.update_cell(20, 32, INDSales.index[2].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 33, INDSales.iloc[2])
-    wb.update_cell(20, 34, INDSales.index[3].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 35, INDSales.iloc[3])
-    wb.update_cell(20, 36, INDSales.index[4].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 37, INDSales.iloc[4])
+    safe_update_cell(20, 32, INDSales.index[2].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 33, INDSales.iloc[2])
+    safe_update_cell(20, 34, INDSales.index[3].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 35, INDSales.iloc[3])
+    safe_update_cell(20, 36, INDSales.index[4].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 37, INDSales.iloc[4])
 
     INDSales_Q = INDSalesGet.resample('QE').last()
-    wb.update_cell(25, 36, INDSales_Q.index[-2].strftime('%Y-%m-%d'))
-    wb.update_cell(25, 37, INDSales_Q.iloc[-2])
-    wb.update_cell(25, 34, INDSales_Q.index[-3].strftime('%Y-%m-%d'))
-    wb.update_cell(25, 35, INDSales_Q.iloc[-3])
-    wb.update_cell(25, 32, INDSales_Q.index[-4].strftime('%Y-%m-%d'))
-    wb.update_cell(25, 33, INDSales_Q.iloc[-4])
+    safe_update_cell(25, 36, INDSales_Q.index[-2].strftime('%Y-%m-%d'))
+    safe_update_cell(25, 37, INDSales_Q.iloc[-2])
+    safe_update_cell(25, 34, INDSales_Q.index[-3].strftime('%Y-%m-%d'))
+    safe_update_cell(25, 35, INDSales_Q.iloc[-3])
+    safe_update_cell(25, 32, INDSales_Q.index[-4].strftime('%Y-%m-%d'))
+    safe_update_cell(25, 33, INDSales_Q.iloc[-4])
 
     INDSales_Y = INDSalesGet.resample('YE').last()
-    wb.update_cell(30, 36, INDSales_Y.index[-2].strftime('%Y-%m-%d'))
-    wb.update_cell(30, 37, INDSales_Y.iloc[-2])
-    wb.update_cell(30, 34, INDSales_Y.index[-3].strftime('%Y-%m-%d'))
-    wb.update_cell(30, 35, INDSales_Y.iloc[-3])
-    wb.update_cell(30, 32, INDSales_Y.index[-4].strftime('%Y-%m-%d'))
-    wb.update_cell(30, 33, INDSales_Y.iloc[-4])
+    safe_update_cell(30, 36, INDSales_Y.index[-2].strftime('%Y-%m-%d'))
+    safe_update_cell(30, 37, INDSales_Y.iloc[-2])
+    safe_update_cell(30, 34, INDSales_Y.index[-3].strftime('%Y-%m-%d'))
+    safe_update_cell(30, 35, INDSales_Y.iloc[-3])
+    safe_update_cell(30, 32, INDSales_Y.index[-4].strftime('%Y-%m-%d'))
+    safe_update_cell(30, 33, INDSales_Y.iloc[-4])
 
     # INDPRO
     print("\nProcessing INDPRO...")
@@ -438,8 +459,8 @@ if __name__ == "__main__":
     latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
     for i in range(len(latest)):
-        wb.update_cell(20, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-        wb.update_cell(20, 33 + (i * 2), float(latest.loc[i, "mom"]))
+        safe_update_cell(20, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+        safe_update_cell(20, 33 + (i * 2), float(latest.loc[i, "mom"]))
 
     df_q = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
     q = df_q.resample("QE").last()
@@ -448,25 +469,25 @@ if __name__ == "__main__":
     latest = q.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "qoq"]
     for i in range(len(latest)):
-        wb.update_cell(25, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-        wb.update_cell(25, 33 + (i * 2), float(latest.loc[i, "qoq"]))
+        safe_update_cell(25, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+        safe_update_cell(25, 33 + (i * 2), float(latest.loc[i, "qoq"]))
 
     df_y = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
     df_y["yoy"] = df_y["level"].pct_change(12, fill_method=None) * 100
     latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
     for i in range(len(latest)):
-        wb.update_cell(30, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-        wb.update_cell(30, 33 + (i * 2), float(latest.loc[i, "yoy"]))
+        safe_update_cell(30, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+        safe_update_cell(30, 33 + (i * 2), float(latest.loc[i, "yoy"]))
 
     INDProdGet = fred.get_series('INDPRO')
     INDProd = INDProdGet.tail()
-    wb.update_cell(20, 38, INDProd.index[2].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 39, INDProd.iloc[2])
-    wb.update_cell(20, 40, INDProd.index[3].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 41, INDProd.iloc[3])
-    wb.update_cell(20, 42, INDProd.index[4].strftime('%Y-%m-%d'))
-    wb.update_cell(20, 43, INDProd.iloc[4])
+    safe_update_cell(20, 38, INDProd.index[2].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 39, INDProd.iloc[2])
+    safe_update_cell(20, 40, INDProd.index[3].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 41, INDProd.iloc[3])
+    safe_update_cell(20, 42, INDProd.index[4].strftime('%Y-%m-%d'))
+    safe_update_cell(20, 43, INDProd.iloc[4])
 
     # Employment & Others
     employment_series = [
@@ -485,14 +506,14 @@ if __name__ == "__main__":
             latest = df_m.tail(3).reset_index()
             latest.columns = ["date", "level", "change"]
             for i in range(len(latest)):
-                wb.update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-                wb.update_cell(114, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'change']):+d}K")
+                safe_update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+                safe_update_cell(114, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'change']):+d}K")
         else:
             latest = df_m.tail(3).reset_index()
             latest.columns = ["date", "level"]
             for i in range(len(latest)):
-                wb.update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-                wb.update_cell(114, (base_col + 1) + (i * 2), latest.loc[i, "level"])
+                safe_update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+                safe_update_cell(114, (base_col + 1) + (i * 2), latest.loc[i, "level"])
         
         df_q = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
         q = df_q.resample("QE").last().iloc[:-1].dropna()
@@ -502,14 +523,14 @@ if __name__ == "__main__":
             latest = q.tail(3).reset_index()
             latest.columns = ["date", "level", "change"]
             for i in range(len(latest)):
-                wb.update_cell(119, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-                wb.update_cell(119, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'change']):+d}K")
+                safe_update_cell(119, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+                safe_update_cell(119, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'change']):+d}K")
         else:
             latest = q.tail(3).reset_index()
             latest.columns = ["date", "level"]
             for i in range(len(latest)):
-                wb.update_cell(119, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-                wb.update_cell(119, (base_col + 1) + (i * 2), latest.loc[i, "level"])
+                safe_update_cell(119, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+                safe_update_cell(119, (base_col + 1) + (i * 2), latest.loc[i, "level"])
 
         df_y = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
         if is_diff:
@@ -518,16 +539,16 @@ if __name__ == "__main__":
             latest = df_y.tail(3).reset_index()
             latest.columns = ["date", "level", "yoy_change"]
             for i in range(len(latest)):
-                wb.update_cell(124, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-                wb.update_cell(124, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'yoy_change']):+d}K")
+                safe_update_cell(124, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+                safe_update_cell(124, (base_col + 1) + (i * 2), f"'{int(latest.loc[i, 'yoy_change']):+d}K")
         else:
             latest_month = df_y.index[-1].month
             same_month = df_y[df_y.index.month == latest_month]
             latest = same_month.tail(3).reset_index()
             latest.columns = ["date", "level"]
             for i in range(len(latest)):
-                wb.update_cell(124, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
-                wb.update_cell(124, (base_col + 1) + (i * 2), round(latest.loc[i, "level"], 1))
+                safe_update_cell(124, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
+                safe_update_cell(124, (base_col + 1) + (i * 2), round(latest.loc[i, "level"], 1))
 
     # Extended series handling blocks
     for ticker, offsets in [("CIVPART", [14,16,18, 14,16,18, 14,16,18]), 
@@ -542,38 +563,38 @@ if __name__ == "__main__":
             idx2, idx3, idx4 = -2, -3, -4
             if ticker == "JTSJOL":
                 idx2, idx3, idx4 = 2, 3, 4
-            wb.update_cell(114, offsets[0], Var.index[idx2].strftime('%Y-%m-%d'))
-            wb.update_cell(114, offsets[0]+1, Var.iloc[idx2])
-            wb.update_cell(114, offsets[1], Var.index[idx3].strftime('%Y-%m-%d'))
-            wb.update_cell(114, offsets[1]+1, Var.iloc[idx3])
-            wb.update_cell(114, offsets[2], Var.index[idx4].strftime('%Y-%m-%d'))
-            wb.update_cell(114, offsets[2]+1, Var.iloc[idx4])
+            safe_update_cell(114, offsets[0], Var.index[idx2].strftime('%Y-%m-%d'))
+            safe_update_cell(114, offsets[0]+1, Var.iloc[idx2])
+            safe_update_cell(114, offsets[1], Var.index[idx3].strftime('%Y-%m-%d'))
+            safe_update_cell(114, offsets[1]+1, Var.iloc[idx3])
+            safe_update_cell(114, offsets[2], Var.index[idx4].strftime('%Y-%m-%d'))
+            safe_update_cell(114, offsets[2]+1, Var.iloc[idx4])
         else: 
             Var = VarGet.tail()
-            wb.update_cell(114, 14, Var.index[2].strftime('%Y-%m-%d'))
-            wb.update_cell(114, 15, Var.iloc[2])
-            wb.update_cell(114, 16, Var.index[3].strftime('%Y-%m-%d'))
-            wb.update_cell(114, 17, Var.iloc[3])
-            wb.update_cell(114, 18, Var.index[4].strftime('%Y-%m-%d'))
-            wb.update_cell(114, 19, Var.iloc[4])
+            safe_update_cell(114, 14, Var.index[2].strftime('%Y-%m-%d'))
+            safe_update_cell(114, 15, Var.iloc[2])
+            safe_update_cell(114, 16, Var.index[3].strftime('%Y-%m-%d'))
+            safe_update_cell(114, 17, Var.iloc[3])
+            safe_update_cell(114, 18, Var.index[4].strftime('%Y-%m-%d'))
+            safe_update_cell(114, 19, Var.iloc[4])
 
         # Quarterly mapping
         VarQ = VarGet.resample('QE').last()
-        wb.update_cell(119, offsets[3], VarQ.index[-2].strftime('%Y-%m-%d'))
-        wb.update_cell(119, offsets[3]+1, VarQ.iloc[-2])
-        wb.update_cell(119, offsets[4], VarQ.index[-3].strftime('%Y-%m-%d'))
-        wb.update_cell(119, offsets[4]+1, VarQ.iloc[-3])
-        wb.update_cell(119, offsets[5], VarQ.index[-4].strftime('%Y-%m-%d'))
-        wb.update_cell(119, offsets[5]+1, VarQ.iloc[-4])
+        safe_update_cell(119, offsets[3], VarQ.index[-2].strftime('%Y-%m-%d'))
+        safe_update_cell(119, offsets[3]+1, VarQ.iloc[-2])
+        safe_update_cell(119, offsets[4], VarQ.index[-3].strftime('%Y-%m-%d'))
+        safe_update_cell(119, offsets[4]+1, VarQ.iloc[-3])
+        safe_update_cell(119, offsets[5], VarQ.index[-4].strftime('%Y-%m-%d'))
+        safe_update_cell(119, offsets[5]+1, VarQ.iloc[-4])
 
         # Yearly mapping
         VarY = VarGet.resample('YE').last()
-        wb.update_cell(124, offsets[6], VarY.index[-2].strftime('%Y-%m-%d'))
-        wb.update_cell(124, offsets[6]+1, VarY.iloc[-2])
-        wb.update_cell(124, offsets[7], VarY.index[-3].strftime('%Y-%m-%d'))
-        wb.update_cell(124, offsets[7]+1, VarY.iloc[-3])
-        wb.update_cell(124, offsets[8], VarY.index[-4].strftime('%Y-%m-%d'))
-        wb.update_cell(124, offsets[8]+1, VarY.iloc[-4])
+        safe_update_cell(124, offsets[6], VarY.index[-2].strftime('%Y-%m-%d'))
+        safe_update_cell(124, offsets[6]+1, VarY.iloc[-2])
+        safe_update_cell(124, offsets[7], VarY.index[-3].strftime('%Y-%m-%d'))
+        safe_update_cell(124, offsets[7]+1, VarY.iloc[-3])
+        safe_update_cell(124, offsets[8], VarY.index[-4].strftime('%Y-%m-%d'))
+        safe_update_cell(124, offsets[8]+1, VarY.iloc[-4])
 
     # Execute Web Scrapers
     scrape_ism_services_history()
