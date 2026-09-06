@@ -25,16 +25,16 @@ wb = None
 # =========================
 def safe_update_cell(row, col, val):
     global wb
-    max_retries = 5
+    max_retries = 8
     for attempt in range(max_retries):
         try:
             wb.update_cell(row, col, val)
-            time.sleep(1.2)  # Paces the script to ~50 writes/min to prevent 429 errors
+            time.sleep(2.5)  # Paced to ~24 writes/min to strictly prevent 429 limit errors
             return
         except Exception as e:
             if '429' in str(e):
-                sleep_time = 5 * (2 ** attempt)
-                print(f"API 429 Quota Exceeded. Sleeping {sleep_time}s before retrying...")
+                sleep_time = 10 * (1.5 ** attempt)
+                print(f"API 429 Quota Exceeded. Sleeping {sleep_time:.1f}s before retrying...")
                 time.sleep(sleep_time)
             else:
                 raise e
@@ -101,9 +101,19 @@ def scrape_ism_services_history():
             sb.uc_open_with_reconnect(url, 6)
             sb.uc_gui_click_captcha()
             sb.sleep(3)
+            
             for i in range(4):
                 if sb.is_link_text_visible("More"):
-                    sb.click_link_text("More")
+                    try:
+                        sb.click_link_text("More")
+                    except Exception:
+                        # Fallback: Hide any floating banner overlay that intercepts the click, then try again
+                        sb.execute_script("""
+                            var overlays = document.querySelectorAll('.anchor-banner__content');
+                            overlays.forEach(function(el) { el.style.display = 'none'; });
+                        """)
+                        sb.sleep(1)
+                        sb.click_link_text("More")
                     sb.sleep(3)
             html_source = sb.get_page_source()
     except Exception as e:
@@ -181,9 +191,19 @@ def scrape_ism_manufacturing_history():
             sb.uc_open_with_reconnect(url, 6)
             sb.uc_gui_click_captcha()
             sb.sleep(3)
+            
             for i in range(4):
                 if sb.is_link_text_visible("More"):
-                    sb.click_link_text("More")
+                    try:
+                        sb.click_link_text("More")
+                    except Exception:
+                        # Fallback: Hide any floating banner overlay that intercepts the click, then try again
+                        sb.execute_script("""
+                            var overlays = document.querySelectorAll('.anchor-banner__content');
+                            overlays.forEach(function(el) { el.style.display = 'none'; });
+                        """)
+                        sb.sleep(1)
+                        sb.click_link_text("More")
                     sb.sleep(3)
             html_source = sb.get_page_source()
     except Exception as e:
