@@ -26,6 +26,13 @@ wb = None
 def safe_update_cell(row, col, val):
     global wb
     max_retries = 8
+    
+    # If the value is not a string (e.g., float, int, numpy type), 
+    # we prepend an apostrophe to force it as text. This prevents Google Sheets 
+    # from automatically formatting the numbers as Dates (e.g., '1899-12-30').
+    if not isinstance(val, str):
+        val = f"'{val}"
+        
     for attempt in range(max_retries):
         try:
             wb.update_cell(row, col, val)
@@ -109,8 +116,10 @@ def scrape_ism_services_history():
                     except Exception:
                         # Fallback: Hide any floating banner overlay that intercepts the click, then try again
                         sb.execute_script("""
-                            var overlays = document.querySelectorAll('.anchor-banner__content');
-                            overlays.forEach(function(el) { el.style.display = 'none'; });
+                            var overlays = document.querySelectorAll('[class*="anchor-banner"]');
+                            for (var j = 0; j < overlays.length; j++) {
+                                overlays[j].style.display = 'none';
+                            }
                         """)
                         sb.sleep(1)
                         sb.click_link_text("More")
@@ -199,8 +208,10 @@ def scrape_ism_manufacturing_history():
                     except Exception:
                         # Fallback: Hide any floating banner overlay that intercepts the click, then try again
                         sb.execute_script("""
-                            var overlays = document.querySelectorAll('.anchor-banner__content');
-                            overlays.forEach(function(el) { el.style.display = 'none'; });
+                            var overlays = document.querySelectorAll('[class*="anchor-banner"]');
+                            for (var j = 0; j < overlays.length; j++) {
+                                overlays[j].style.display = 'none';
+                            }
                         """)
                         sb.sleep(1)
                         sb.click_link_text("More")
