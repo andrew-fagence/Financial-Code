@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import shutil
+import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from email.utils import parsedate_to_datetime
@@ -465,56 +466,68 @@ def update_google_sheet_with_tweets(accounts):
     # Extract just the sanitized text back into a list format for Google Sheets
     all_rows_to_write = [[t[1]] for t in all_extracted_tweets]
 
-    # 3. Connect and update Google Sheet using oauth2client
-    try:
-        scope = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-
-        # Use GCP Github Secrets when available
-        gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
-        if gcp_credentials_json:
-            creds_dict = json.loads(gcp_credentials_json)
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        else:
-            creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
-
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(SPREADSHEET_ID)
-
-        # Connect to or create the "News" worksheet
-        worksheet = None
+    # 3. Connect and update Google Sheet using oauth2client with 10 max retries
+    max_retries = 10
+    for attempt in range(max_retries):
         try:
-            worksheet = sh.worksheet("News")
-        except gspread.exceptions.WorksheetNotFound:
-            print("Creating worksheet 'News'...")
-            worksheet = sh.add_worksheet(title="News", rows="100", cols="5")
+            scope = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
 
-        print(f"Clearing old content in worksheet '{worksheet.title}'...")
-        worksheet.clear()
+            # Use GCP Github Secrets when available
+            gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
+            if gcp_credentials_json:
+                creds_dict = json.loads(gcp_credentials_json)
+                creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            else:
+                creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
 
-        print(f"Writing {len(all_rows_to_write)} records to worksheet '{worksheet.title}'...")
-        worksheet.update(range_name='A1', values=all_rows_to_write)
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(SPREADSHEET_ID)
 
-        # --- Polish spreadsheet layout and formatting ---
-        print("Applying clean table formatting and auto-resizing columns...")
-        try:
-            # Enable word wrapping on Column A (the formatted tweet column)
-            worksheet.format('A:A', {'wrapStrategy': 'WRAP'})
-        except Exception as format_err:
-            print(f"Word wrapping failed: {format_err}")
+            # Connect to or create the "News" worksheet
+            worksheet = None
+            try:
+                worksheet = sh.worksheet("News")
+            except gspread.exceptions.WorksheetNotFound:
+                print("Creating worksheet 'News'...")
+                worksheet = sh.add_worksheet(title="News", rows="100", cols="5")
 
-        try:
-            # Automatically resize Column A so no text is cut off
-            worksheet.columns_auto_resize(0, 1)
-        except Exception as resize_err:
-            print(f"Auto-resizing failed: {resize_err}")
+            print(f"Clearing old content in worksheet '{worksheet.title}'...")
+            worksheet.clear()
 
-        print("News sheet updated successfully.")
+            print(f"Writing {len(all_rows_to_write)} records to worksheet '{worksheet.title}'...")
+            worksheet.update(range_name='A1', values=all_rows_to_write)
 
-    except Exception as e:
-        print(f"Failed to write to Google Sheet: {e}")
+            # --- Polish spreadsheet layout and formatting ---
+            print("Applying clean table formatting and auto-resizing columns...")
+            try:
+                # Enable word wrapping on Column A (the formatted tweet column)
+                worksheet.format('A:A', {'wrapStrategy': 'WRAP'})
+            except Exception as format_err:
+                print(f"Word wrapping failed: {format_err}")
+
+            try:
+                # Automatically resize Column A so no text is cut off
+                worksheet.columns_auto_resize(0, 1)
+            except Exception as resize_err:
+                print(f"Auto-resizing failed: {resize_err}")
+
+            print("News sheet updated successfully.")
+            break  # Exit the loop on success
+
+        except Exception as e:
+            error_message = str(e)
+            if "429" in error_message or "Quota exceeded" in error_message or "rateLimitExceeded" in error_message:
+                if attempt < max_retries - 1:
+                    print(f"Rate limit exceeded (429). Retrying in 10 seconds... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(10)
+                else:
+                    print(f"Failed to write to Google Sheet after {max_retries} attempts: {e}")
+            else:
+                print(f"Failed to write to Google Sheet: {e}")
+                break
 
 if __name__ == "__main__":
     # Define the accounts to scrape (exactly 5 tweets each will be displayed, without author prefixes)
