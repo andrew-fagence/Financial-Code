@@ -1,4 +1,5 @@
 import datetime
+import time
 import json
 import glob
 import os
@@ -430,68 +431,80 @@ def update_google_sheet_with_tweets(accounts):
     for t in all_tweets:
         rows_to_write.append([t["formatted_time"], t["content"], t["author"]])
 
-    # 3. Connect and update Google Sheet using oauth2client
-    try:
-        scope = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
+    # 3. Connect and update Google Sheet using oauth2client with 10 max retries
+    max_retries = 10
+    for attempt in range(max_retries):
+        try:
+            scope = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
 
-        # Use GCP Github Secrets when available
-        gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
-        if gcp_credentials_json:
-            creds_dict = json.loads(gcp_credentials_json)
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        else:
-            creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+            # Use GCP Github Secrets when available
+            gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
+            if gcp_credentials_json:
+                creds_dict = json.loads(gcp_credentials_json)
+                creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            else:
+                creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
 
-        gc = gspread.authorize(creds)
-        sh = gc.open_by_key(SPREADSHEET_ID)
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(SPREADSHEET_ID)
 
-        # Check for sheet name variations: "XNews" or "X_News"
-        worksheet = None
-        for name in ["XNews", "X_News"]:
+            # Check for sheet name variations: "XNews" or "X_News"
+            worksheet = None
+            for name in ["XNews", "X_News"]:
+                try:
+                    worksheet = sh.worksheet(name)
+                    break
+                except gspread.exceptions.WorksheetNotFound:
+                    continue
+
+            if not worksheet:
+                print("Creating worksheet 'XNews'...")
+                worksheet = sh.add_worksheet(title="XNews", rows="100", cols="5")
+
+            print(f"Clearing old content in worksheet '{worksheet.title}'...")
+            worksheet.clear()
+
+            print(f"Writing {len(rows_to_write) - 1} records...")
+            # Use named arguments to ensure compatibility across gspread v5.x and v6.x
+            worksheet.update(range_name='A1', values=rows_to_write)
+
+            # --- Polish spreadsheet layout and formatting ---
+            print("Applying clean table formatting and auto-resizing columns...")
             try:
-                worksheet = sh.worksheet(name)
-                break
-            except gspread.exceptions.WorksheetNotFound:
-                continue
+                # Make the header bold
+                worksheet.format('A1:C1', {'textFormat': {'bold': True}})
+            except Exception as format_err:
+                print(f"Bold formatting omitted: {format_err}")
 
-        if not worksheet:
-            print("Creating worksheet 'XNews'...")
-            worksheet = sh.add_worksheet(title="XNews", rows="100", cols="5")
+            try:
+                # Enable word wrapping on Column B (the tweet message column)
+                worksheet.format('B:B', {'wrapStrategy': 'WRAP'})
+            except Exception as format_err:
+                print(f"Word wrapping omitted: {format_err}")
 
-        print(f"Clearing old content in worksheet '{worksheet.title}'...")
-        worksheet.clear()
+            try:
+                # Automatically resize columns A, B, and C so no dates or text are cut off
+                worksheet.columns_auto_resize(0, 3)
+            except Exception as resize_err:
+                print(f"Auto-resizing omitted: {resize_err}")
 
-        print(f"Writing {len(rows_to_write) - 1} records...")
-        # Use named arguments to ensure compatibility across gspread v5.x and v6.x
-        worksheet.update(range_name='A1', values=rows_to_write)
+            print("XNews sheet updated successfully.")
+            break  # Break out of the retry loop upon success
 
-        # --- Polish spreadsheet layout and formatting ---
-        print("Applying clean table formatting and auto-resizing columns...")
-        try:
-            # Make the header bold
-            worksheet.format('A1:C1', {'textFormat': {'bold': True}})
-        except Exception as format_err:
-            print(f"Bold formatting omitted: {format_err}")
-
-        try:
-            # Enable word wrapping on Column B (the tweet message column)
-            worksheet.format('B:B', {'wrapStrategy': 'WRAP'})
-        except Exception as format_err:
-            print(f"Word wrapping omitted: {format_err}")
-
-        try:
-            # Automatically resize columns A, B, and C so no dates or text are cut off
-            worksheet.columns_auto_resize(0, 3)
-        except Exception as resize_err:
-            print(f"Auto-resizing omitted: {resize_err}")
-
-        print("XNews sheet updated successfully.")
-
-    except Exception as e:
-        print(f"Failed to write to Google Sheet: {e}")
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "Quota exceeded" in error_msg or "rateLimitExceeded" in error_msg:
+                if attempt < max_retries - 1:
+                    print(f"Google Sheets Rate Limit Exceeded (429). Retrying {attempt + 1}/{max_retries} in 15 seconds...")
+                    time.sleep(15) # Wait for 15 seconds to let the rate limit reset per minute limit
+                else:
+                    print(f"Failed to write to Google Sheet after {max_retries} attempts: {e}")
+            else:
+                print(f"Failed to write to Google Sheet: {e}")
+                break # Not a rate limit issue, so don't infinitely retry
 
 
 if __name__ == "__main__":
