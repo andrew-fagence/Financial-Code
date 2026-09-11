@@ -11,6 +11,13 @@ warnings.filterwarnings('ignore')
 
 print("Starting fundamental_jpn_data.py...")
 
+# Global headers to prevent 403 Forbidden WAF blocks
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5"
+}
+
 # =============================================================================
 # SETUP & AUTHENTICATION
 # =============================================================================
@@ -47,7 +54,7 @@ URL = (
     f"&lang=E"
 )
 
-r = requests.get(URL, timeout=60)
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 data = r.json()
 
@@ -130,7 +137,7 @@ URL = (
     f"&lang=E"
 )
 
-r = requests.get(URL, timeout=60)
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 data = r.json()
 
@@ -211,7 +218,7 @@ URL = (
     "&code=PRCG20_2200000000"
 )
 
-r = requests.get(URL, timeout=60)
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 
 data = r.json()
@@ -277,7 +284,7 @@ Q = "https://www.esri.cao.go.jp/jp/sna/data/data_list/sokuhou/files/2026/qe262/t
 
 def read_gdp(url):
     return pd.read_csv(
-        BytesIO(requests.get(url, timeout=60).content),
+        BytesIO(requests.get(url, headers=HEADERS, timeout=60).content),
         header=None,
         encoding="cp932"
     ).iloc[7:, [0, 1]]
@@ -329,10 +336,9 @@ for i, x in yearly.iterrows():
 # =============================================================================
 # JAPAN RETAIL SALES
 # =============================================================================
-# NOTE: defined standard METI Historical Data URL for `excel` variable
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 
-r = requests.get(excel, timeout=60)
+r = requests.get(excel, headers=HEADERS, timeout=60)
 r.raise_for_status()
 b = BytesIO(r.content)
 
@@ -415,7 +421,7 @@ URL = (
     "?statInfId=000040172363&fileKind=0"
 )
 
-r = requests.get(URL, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 b = BytesIO(r.content)
 
@@ -546,7 +552,7 @@ URL = (
     "?statInfId=000031831358&fileKind=0"
 )
 
-r = requests.get(URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 
 raw = pd.read_excel(BytesIO(r.content), sheet_name="季節調整値", header=None)
@@ -684,7 +690,7 @@ print("\nJapan Unemployment Rate updated successfully")
 # JAPAN LABOUR FORCE PARTICIPATION RATE
 # =============================================================================
 URL = "https://ecitizen.jp/statdb/StatsData/0003005865"
-html = requests.get(URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=60).text
+html = requests.get(URL, headers=HEADERS, timeout=60).text
 tables = pd.read_html(StringIO(html))
 t = max(tables, key=lambda x: x.shape[0])
 t.columns = [str(c).strip() for c in t.columns]
@@ -738,13 +744,12 @@ print("\nJapan Labour Force Participation Rate updated successfully")
 # =============================================================================
 # JAPAN AVERAGE HOURLY EARNINGS
 # =============================================================================
-H = {"User-Agent": "Mozilla/5.0"}
 C = "https://www.jil.go.jp/english/estatis/eshuyo/e0301.html"
 HRS = "https://www.jil.go.jp/english/estatis/eshuyo/e0401.html"
 months_map = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
 
 def load(url, word):
-    t = next(x for x in pd.read_html(StringIO(requests.get(url, headers=H, timeout=60).text)) if word in x.to_string())
+    t = next(x for x in pd.read_html(StringIO(requests.get(url, headers=HEADERS, timeout=60).text)) if word in x.to_string())
     rows = []
     year = None
     for _, r in t.iterrows():
@@ -794,7 +799,7 @@ print("\nJapan Average Hourly Earnings updated successfully")
 # JAPAN INITIAL JOBLESS CLAIMS PROXY
 # =============================================================================
 URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040460962&fileKind=0"
-r = requests.get(URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 raw = pd.read_excel(BytesIO(r.content), header=None)
 
@@ -843,7 +848,7 @@ print("\nJapan Initial Jobless Claims proxy updated successfully")
 # JAPAN JOB OPENINGS
 # =============================================================================
 URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040478164&fileKind=0"
-r = requests.get(URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = requests.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 raw = pd.read_excel(BytesIO(r.content), header=None)
 
