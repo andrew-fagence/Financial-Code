@@ -95,11 +95,6 @@ monthly = df.dropna(subset=["monthly_change"]).tail(3).reset_index(drop=True)
 print("\nMonthly Japan Core CPI")
 print(monthly[["date", "monthly_change"]])
 
-# Row 5, starting Column B
-for i, x in monthly.iterrows():
-    api_retry(wb.update_cell, 5, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 5, 3 + i * 2, round(x["monthly_change"], 2))
-
 # Quarterly Core CPI
 quarterly = (
     df.set_index("date")["core_cpi"]
@@ -121,11 +116,6 @@ quarterly = quarterly.tail(3).reset_index(drop=True)
 print("\nQuarterly Japan Core CPI")
 print(quarterly)
 
-# Row 10, starting Column B
-for i, x in quarterly.iterrows():
-    api_retry(wb.update_cell, 10, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 10, 3 + i * 2, round(x["quarterly_change"], 2))
-
 # Yearly Core CPI
 df["yearly_change"] = df["core_cpi"].pct_change(12) * 100
 yearly = df.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
@@ -133,10 +123,25 @@ yearly = df.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
 print("\nYearly Japan Core CPI")
 print(yearly[["date", "yearly_change"]])
 
-# Row 15, starting Column B
-for i, x in yearly.iterrows():
-    api_retry(wb.update_cell, 15, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 15, 3 + i * 2, round(x["yearly_change"], 2))
+# Google Sheets Update - Batched
+core_monthly_values = []
+for _, x in monthly.iterrows():
+    core_monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["monthly_change"], 2)]
+
+core_quarterly_values = []
+for _, x in quarterly.iterrows():
+    core_quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["quarterly_change"], 2)]
+
+core_yearly_values = []
+for _, x in yearly.iterrows():
+    core_yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
+
+api_retry(wb.batch_update, [
+    {"range": "B5:G5", "values": [core_monthly_values]},
+    {"range": "B10:G10", "values": [core_quarterly_values]},
+    {"range": "B15:G15", "values": [core_yearly_values]}
+])
+print("\nJapan Core CPI updated successfully")
 
 
 # =============================================================================
@@ -177,11 +182,6 @@ monthly = df.dropna(subset=["monthly_change"]).tail(3).reset_index(drop=True)
 print("\nMonthly Japan Headline CPI")
 print(monthly[["date", "monthly_change"]])
 
-# Row 5, starting Column H
-for i, x in monthly.iterrows():
-    api_retry(wb.update_cell, 5, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 5, 9 + i * 2, round(x["monthly_change"], 2))
-
 # Quarterly Headline CPI
 quarterly = (
     df.set_index("date")["headline_cpi"]
@@ -202,11 +202,6 @@ quarterly = quarterly.tail(3).reset_index(drop=True)
 print("\nQuarterly Japan Headline CPI")
 print(quarterly)
 
-# Row 10, starting Column H
-for i, x in quarterly.iterrows():
-    api_retry(wb.update_cell, 10, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 10, 9 + i * 2, round(x["quarterly_change"], 2))
-
 # Yearly Headline CPI
 df["yearly_change"] = df["headline_cpi"].pct_change(12) * 100
 yearly = df.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
@@ -214,10 +209,25 @@ yearly = df.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
 print("\nYearly Japan Headline CPI")
 print(yearly[["date", "yearly_change"]])
 
-# Row 15, starting Column H
-for i, x in yearly.iterrows():
-    api_retry(wb.update_cell, 15, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 15, 9 + i * 2, round(x["yearly_change"], 2))
+# Google Sheets Update - Batched
+head_monthly_values = []
+for _, x in monthly.iterrows():
+    head_monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["monthly_change"], 2)]
+
+head_quarterly_values = []
+for _, x in quarterly.iterrows():
+    head_quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["quarterly_change"], 2)]
+
+head_yearly_values = []
+for _, x in yearly.iterrows():
+    head_yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
+
+api_retry(wb.batch_update, [
+    {"range": "H5:M5", "values": [head_monthly_values]},
+    {"range": "H10:M10", "values": [head_quarterly_values]},
+    {"range": "H15:M15", "values": [head_yearly_values]}
+])
+print("\nJapan Headline CPI updated successfully")
 
 
 # =============================================================================
@@ -252,11 +262,6 @@ monthly = df.dropna(subset=["monthly_change"]).tail(3).reset_index(drop=True)
 print("\nMonthly Japan PPI")
 print(monthly[["date", "monthly_change"]])
 
-# Row 5, starting Column N
-for i, x in monthly.iterrows():
-    api_retry(wb.update_cell, 5, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 5, 15 + i * 2, round(x["monthly_change"], 2))
-
 # Quarterly PPI
 q = (
     df.assign(quarter=df["date"].dt.to_period("Q"))
@@ -274,10 +279,6 @@ quarterly = quarterly[["date", "quarterly_change"]].reset_index(drop=True)
 print("\nQuarterly Japan PPI")
 print(quarterly)
 
-for i, x in quarterly.iterrows():
-    api_retry(wb.update_cell, 10, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 10, 15 + i * 2, round(x["quarterly_change"], 4))
-
 # Yearly PPI
 df["yearly_change"] = df["ppi"].pct_change(12) * 100
 yearly = df.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
@@ -285,10 +286,25 @@ yearly = df.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
 print("\nYearly Japan PPI")
 print(yearly[["date", "yearly_change"]])
 
-# Row 15, starting Column N
-for i, x in yearly.iterrows():
-    api_retry(wb.update_cell, 15, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    api_retry(wb.update_cell, 15, 15 + i * 2, round(x["yearly_change"], 2))
+# Google Sheets Update - Batched
+ppi_monthly_values = []
+for _, x in monthly.iterrows():
+    ppi_monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["monthly_change"], 2)]
+
+ppi_quarterly_values = []
+for _, x in quarterly.iterrows():
+    ppi_quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["quarterly_change"], 4)]
+
+ppi_yearly_values = []
+for _, x in yearly.iterrows():
+    ppi_yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
+
+api_retry(wb.batch_update, [
+    {"range": "N5:S5", "values": [ppi_monthly_values]},
+    {"range": "N10:S10", "values": [ppi_quarterly_values]},
+    {"range": "N15:S15", "values": [ppi_yearly_values]}
+])
+print("\nJapan PPI updated successfully")
 
 
 # =============================================================================
@@ -335,17 +351,22 @@ print(quarterly)
 print("\nJapan Real GDP YoY")
 print(yearly[["quarter", "yoy"]])
 
-# Row 28 — B/C, D/E, F/G
-for i, x in quarterly.iterrows():
+# Google Sheets Update - Batched
+gdp_quarterly_values = []
+for _, x in quarterly.iterrows():
     date = pd.Period(x["quarter"], freq="Q").end_time.strftime("%Y-%m-%d")
-    api_retry(wb.update_cell, 28, 2 + i * 2, date)
-    api_retry(wb.update_cell, 28, 3 + i * 2, round(x["qoq"], 2))
+    gdp_quarterly_values += [date, round(x["qoq"], 2)]
 
-# Row 33 — B/C, D/E, F/G
-for i, x in yearly.iterrows():
+gdp_yearly_values = []
+for _, x in yearly.iterrows():
     date = pd.Period(x["quarter"], freq="Q").end_time.strftime("%Y-%m-%d")
-    api_retry(wb.update_cell, 33, 2 + i * 2, date)
-    api_retry(wb.update_cell, 33, 3 + i * 2, round(x["yoy"], 2))
+    gdp_yearly_values += [date, round(x["yoy"], 2)]
+
+api_retry(wb.batch_update, [
+    {"range": "B28:G28", "values": [gdp_quarterly_values]},
+    {"range": "B33:G33", "values": [gdp_yearly_values]}
+])
+print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
