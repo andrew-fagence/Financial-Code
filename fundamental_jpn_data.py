@@ -5,6 +5,7 @@ import re
 import gspread
 from google.oauth2.service_account import Credentials
 import warnings
+import time
 
 # Suppress warnings for cleaner execution output
 warnings.filterwarnings('ignore')
@@ -37,6 +38,20 @@ sheet = client.open_by_key(sheet_id)
 wb = sheet.worksheet("Historical Values Storage")
 print("Successfully connected to 'Historical Values Storage' tab.\n")
 
+# Google Sheets API Rate Limit Helper
+def api_retry(func, *args, **kwargs):
+    max_attempts = 7
+    for attempt in range(max_attempts):
+        try:
+            return func(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            if "429" in str(e) and attempt < max_attempts - 1:
+                sleep_time = 2 ** attempt
+                print(f"API rate limit (429) hit. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+            else:
+                raise e
+    raise Exception("Max retries exceeded for Google Sheets API")
 
 # =============================================================================
 # JAPAN CORE CPI
@@ -82,8 +97,8 @@ print(monthly[["date", "monthly_change"]])
 
 # Row 5, starting Column B
 for i, x in monthly.iterrows():
-    wb.update_cell(5, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(5, 3 + i * 2, round(x["monthly_change"], 2))
+    api_retry(wb.update_cell, 5, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 5, 3 + i * 2, round(x["monthly_change"], 2))
 
 # Quarterly Core CPI
 quarterly = (
@@ -108,8 +123,8 @@ print(quarterly)
 
 # Row 10, starting Column B
 for i, x in quarterly.iterrows():
-    wb.update_cell(10, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(10, 3 + i * 2, round(x["quarterly_change"], 2))
+    api_retry(wb.update_cell, 10, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 10, 3 + i * 2, round(x["quarterly_change"], 2))
 
 # Yearly Core CPI
 df["yearly_change"] = df["core_cpi"].pct_change(12) * 100
@@ -120,8 +135,8 @@ print(yearly[["date", "yearly_change"]])
 
 # Row 15, starting Column B
 for i, x in yearly.iterrows():
-    wb.update_cell(15, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(15, 3 + i * 2, round(x["yearly_change"], 2))
+    api_retry(wb.update_cell, 15, 2 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 15, 3 + i * 2, round(x["yearly_change"], 2))
 
 
 # =============================================================================
@@ -164,8 +179,8 @@ print(monthly[["date", "monthly_change"]])
 
 # Row 5, starting Column H
 for i, x in monthly.iterrows():
-    wb.update_cell(5, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(5, 9 + i * 2, round(x["monthly_change"], 2))
+    api_retry(wb.update_cell, 5, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 5, 9 + i * 2, round(x["monthly_change"], 2))
 
 # Quarterly Headline CPI
 quarterly = (
@@ -189,8 +204,8 @@ print(quarterly)
 
 # Row 10, starting Column H
 for i, x in quarterly.iterrows():
-    wb.update_cell(10, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(10, 9 + i * 2, round(x["quarterly_change"], 2))
+    api_retry(wb.update_cell, 10, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 10, 9 + i * 2, round(x["quarterly_change"], 2))
 
 # Yearly Headline CPI
 df["yearly_change"] = df["headline_cpi"].pct_change(12) * 100
@@ -201,8 +216,8 @@ print(yearly[["date", "yearly_change"]])
 
 # Row 15, starting Column H
 for i, x in yearly.iterrows():
-    wb.update_cell(15, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(15, 9 + i * 2, round(x["yearly_change"], 2))
+    api_retry(wb.update_cell, 15, 8 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 15, 9 + i * 2, round(x["yearly_change"], 2))
 
 
 # =============================================================================
@@ -239,8 +254,8 @@ print(monthly[["date", "monthly_change"]])
 
 # Row 5, starting Column N
 for i, x in monthly.iterrows():
-    wb.update_cell(5, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(5, 15 + i * 2, round(x["monthly_change"], 2))
+    api_retry(wb.update_cell, 5, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 5, 15 + i * 2, round(x["monthly_change"], 2))
 
 # Quarterly PPI
 q = (
@@ -260,8 +275,8 @@ print("\nQuarterly Japan PPI")
 print(quarterly)
 
 for i, x in quarterly.iterrows():
-    wb.update_cell(10, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(10, 15 + i * 2, round(x["quarterly_change"], 4))
+    api_retry(wb.update_cell, 10, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 10, 15 + i * 2, round(x["quarterly_change"], 4))
 
 # Yearly PPI
 df["yearly_change"] = df["ppi"].pct_change(12) * 100
@@ -272,8 +287,8 @@ print(yearly[["date", "yearly_change"]])
 
 # Row 15, starting Column N
 for i, x in yearly.iterrows():
-    wb.update_cell(15, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(15, 15 + i * 2, round(x["yearly_change"], 2))
+    api_retry(wb.update_cell, 15, 14 + i * 2, x["date"].strftime("%Y-%m-%d"))
+    api_retry(wb.update_cell, 15, 15 + i * 2, round(x["yearly_change"], 2))
 
 
 # =============================================================================
@@ -323,14 +338,14 @@ print(yearly[["quarter", "yoy"]])
 # Row 28 — B/C, D/E, F/G
 for i, x in quarterly.iterrows():
     date = pd.Period(x["quarter"], freq="Q").end_time.strftime("%Y-%m-%d")
-    wb.update_cell(28, 2 + i * 2, date)
-    wb.update_cell(28, 3 + i * 2, round(x["qoq"], 2))
+    api_retry(wb.update_cell, 28, 2 + i * 2, date)
+    api_retry(wb.update_cell, 28, 3 + i * 2, round(x["qoq"], 2))
 
 # Row 33 — B/C, D/E, F/G
 for i, x in yearly.iterrows():
     date = pd.Period(x["quarter"], freq="Q").end_time.strftime("%Y-%m-%d")
-    wb.update_cell(33, 2 + i * 2, date)
-    wb.update_cell(33, 3 + i * 2, round(x["yoy"], 2))
+    api_retry(wb.update_cell, 33, 2 + i * 2, date)
+    api_retry(wb.update_cell, 33, 3 + i * 2, round(x["yoy"], 2))
 
 
 # =============================================================================
@@ -405,7 +420,7 @@ yearly_values = []
 for _, x in yearly_retail.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "H23:M23", "values": [monthly_values]},
     {"range": "H28:M28", "values": [quarterly_values]},
     {"range": "H33:M33", "values": [yearly_values]}
@@ -474,7 +489,7 @@ yearly_values = []
 for _, x in yearly.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "Z23:AE23", "values": [monthly_values]},
     {"range": "Z28:AE28", "values": [quarterly_values]},
     {"range": "Z33:AE33", "values": [yearly_values]}
@@ -536,7 +551,7 @@ yearly_values = []
 for _, x in yearly.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "AF23:AK23", "values": [monthly_values]},
     {"range": "AF28:AK28", "values": [quarterly_values]},
     {"range": "AF33:AK33", "values": [yearly_values]}
@@ -609,7 +624,7 @@ def make_values(data, col):
         out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 1)]
     return out
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "B117:G117", "values": [make_values(monthly, "monthly_change")]},
     {"range": "B122:G122", "values": [make_values(quarterly, "quarterly_change")]},
     {"range": "B127:G127", "values": [make_values(yearly, "yearly_change")]}
@@ -678,7 +693,7 @@ yearly_values = []
 for _, x in yearly.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(float(x["unemployment_rate"]), 2)]
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "H117:M117", "values": [monthly_values]},
     {"range": "H122:M122", "values": [quarterly_values]},
     {"range": "H127:M127", "values": [yearly_values]}
@@ -733,7 +748,7 @@ def vals(d, col):
         out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 2)]
     return out
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "N117:S117", "values": [vals(monthly, "lfpr")]},
     {"range": "N122:S122", "values": [vals(quarterly, "lfpr")]},
     {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
@@ -787,7 +802,7 @@ yearly = df.dropna(subset=["yearly"]).tail(3)
 def vals_ahe(d, c):
     return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "T117:Y117", "values": [vals_ahe(monthly, "monthly")]},
     {"range": "T122:Y122", "values": [vals_ahe(quarterly, "quarterly")]},
     {"range": "T127:Y127", "values": [vals_ahe(yearly, "yearly")]}
@@ -836,7 +851,7 @@ yearly = df.dropna(subset=["yearly"]).tail(3)
 def vals_claims(d, c):
     return sum(([x["date"].strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "Z117:AE117", "values": [vals_claims(monthly, "monthly")]},
     {"range": "Z122:AE122", "values": [vals_claims(quarterly, "quarterly")]},
     {"range": "Z127:AE127", "values": [vals_claims(yearly, "yearly")]}
@@ -880,7 +895,7 @@ yearly = df.dropna(subset=["yearly"]).tail(3)
 def vals_openings(d, c):
     return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
 
-wb.batch_update([
+api_retry(wb.batch_update, [
     {"range": "AF117:AK117", "values": [vals_openings(monthly, "monthly")]},
     {"range": "AF122:AK122", "values": [vals_openings(quarterly, "quarterly")]},
     {"range": "AF127:AK127", "values": [vals_openings(yearly, "yearly")]}
