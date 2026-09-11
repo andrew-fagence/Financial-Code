@@ -6,6 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import warnings
 import time
+import urllib.request
 
 # Suppress warnings for cleaner execution output
 warnings.filterwarnings('ignore')
@@ -374,9 +375,14 @@ print("\nJapan Real GDP updated successfully")
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 
-r = requests.get(excel, headers=HEADERS, timeout=60)
-r.raise_for_status()
-b = BytesIO(r.content)
+# The METI website blocks the 'requests' library on GitHub Actions.
+# We use urllib.request with a Referer header to bypass the 403 Forbidden error.
+req_headers = HEADERS.copy()
+req_headers["Referer"] = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
+
+req = urllib.request.Request(excel, headers=req_headers)
+with urllib.request.urlopen(req, timeout=60) as response:
+    b = BytesIO(response.read())
 
 def load_series(sheet_name):
     x = pd.read_excel(b, sheet_name=sheet_name, header=None)
