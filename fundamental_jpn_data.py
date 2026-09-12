@@ -8,6 +8,7 @@ import warnings
 import time
 import urllib.request
 import urllib.parse
+import subprocess
 
 # Suppress warnings for cleaner execution output
 warnings.filterwarnings('ignore')
@@ -409,28 +410,47 @@ except Exception as e:
             else:
                 raise Exception("urllib returned non-Excel HTML/WAF content.")
     except Exception as e2:
-        print(f"urllib download failed ({e2}). Trying proxies...")
+        print(f"urllib download failed ({e2}). Trying curl...")
         
-        # Attempt 3: Proxies with strict binary validation
-        encoded_excel = urllib.parse.quote(excel, safe='')
-        proxies = [
-            f"https://api.allorigins.win/raw?url={encoded_excel}",
-            f"https://api.codetabs.com/v1/proxy?quest={excel}",
-            f"https://corsproxy.io/?{excel}"
-        ]
-        
-        for p in proxies:
-            try:
-                r = requests.get(p, headers=HEADERS, timeout=60)
-                r.raise_for_status()
-                if is_excel(r.content):
-                    b = BytesIO(r.content)
-                    print(f"Successfully downloaded Excel via proxy: {p}")
-                    break
-                else:
-                    print(f"Proxy {p} returned invalid content (not an Excel file). Skipping...")
-            except Exception as proxy_e:
-                print(f"Proxy {p} failed: {proxy_e}")
+        # Attempt 3: Using curl via subprocess (bypasses some Python-specific JA3 blocks)
+        try:
+            result = subprocess.run([
+                "curl", "-sL",
+                "-H", f"User-Agent: {HEADERS['User-Agent']}",
+                "-H", f"Referer: {req_headers['Referer']}",
+                excel
+            ], capture_output=True, timeout=60)
+            if result.returncode == 0 and is_excel(result.stdout):
+                b = BytesIO(result.stdout)
+                print("Successfully downloaded Excel via curl.")
+            else:
+                raise Exception("curl returned invalid content.")
+        except Exception as e3:
+            print(f"curl download failed ({e3}). Trying proxies...")
+            
+            # Attempt 4: Proxies with strict binary validation
+            encoded_excel = urllib.parse.quote(excel, safe='')
+            proxies = [
+                f"https://web.archive.org/web/2/{excel}",
+                f"https://corsproxy.org/?{encoded_excel}",
+                f"https://api.allorigins.win/raw?url={encoded_excel}",
+                f"https://api.codetabs.com/v1/proxy?quest={excel}",
+                f"https://corsproxy.io/?{excel}",
+                f"https://thingproxy.freeboard.io/fetch/{excel}"
+            ]
+            
+            for p in proxies:
+                try:
+                    r = requests.get(p, headers=HEADERS, timeout=60)
+                    r.raise_for_status()
+                    if is_excel(r.content):
+                        b = BytesIO(r.content)
+                        print(f"Successfully downloaded Excel via proxy: {p}")
+                        break
+                    else:
+                        print(f"Proxy {p} returned invalid content (not an Excel file). Skipping...")
+                except Exception as proxy_e:
+                    print(f"Proxy {p} failed: {proxy_e}")
 
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
