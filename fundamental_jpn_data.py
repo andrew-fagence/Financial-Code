@@ -7,6 +7,7 @@ from google.oauth2.service_account import Credentials
 import warnings
 import time
 import urllib.request
+import urllib.parse
 
 # Suppress warnings for cleaner execution output
 warnings.filterwarnings('ignore')
@@ -377,12 +378,36 @@ excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 
 # The METI website blocks the 'requests' library on GitHub Actions.
 # We use urllib.request with a Referer header to bypass the 403 Forbidden error.
+# If direct access fails, we gracefully fallback to open CORS proxies.
 req_headers = HEADERS.copy()
 req_headers["Referer"] = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
 
-req = urllib.request.Request(excel, headers=req_headers)
-with urllib.request.urlopen(req, timeout=60) as response:
-    b = BytesIO(response.read())
+try:
+    req = urllib.request.Request(excel, headers=req_headers)
+    with urllib.request.urlopen(req, timeout=60) as response:
+        b = BytesIO(response.read())
+except Exception as e:
+    print(f"Direct download failed ({e}). Trying proxies...")
+    encoded_excel = urllib.parse.quote(excel, safe='')
+    proxies = [
+        f"https://corsproxy.io/?{excel}",
+        f"https://api.allorigins.win/raw?url={encoded_excel}",
+        f"https://api.codetabs.com/v1/proxy?quest={excel}"
+    ]
+    
+    success = False
+    for p in proxies:
+        try:
+            r = requests.get(p, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+            b = BytesIO(r.content)
+            success = True
+            break
+        except Exception as proxy_e:
+            print(f"Proxy {p} failed: {proxy_e}")
+            
+    if not success:
+        raise Exception("All download attempts for Japan Retail Sales failed.")
 
 def load_series(sheet_name):
     x = pd.read_excel(b, sheet_name=sheet_name, header=None)
