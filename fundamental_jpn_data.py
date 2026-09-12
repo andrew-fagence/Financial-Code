@@ -373,7 +373,7 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (curl_cffi WAF Bypass Implementation)
+# JAPAN RETAIL SALES (curl_cffi / Wayback Machine WAF Bypass Implementation)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 referer = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
@@ -418,6 +418,8 @@ if b is None:
         if r.status_code == 200 and is_excel(r.content):
             b = BytesIO(r.content)
             print("Successfully downloaded Excel via requests Session.")
+        else:
+            print(f"requests Session returned status {r.status_code}")
     except Exception as e:
         print(f"requests Session failed: {e}")
 
@@ -431,28 +433,47 @@ if b is None:
             if is_excel(content):
                 b = BytesIO(content)
                 print("Successfully downloaded Excel via urllib.")
+            else:
+                print("urllib returned non-Excel content.")
     except Exception as e:
         print(f"urllib failed: {e}")
 
-# Strategy 4: Wayback Machine CDX API Fallback (Guaranteed to bypass WAF, avoiding 429 redirects)
+# Strategy 4: Wayback Machine CDX API Fallback (Guaranteed to bypass WAF)
 if b is None:
     try:
         print("Attempting Wayback Machine...")
-        cdx_url = f"http://web.archive.org/cdx/search/cdx?url={urllib.parse.quote(excel)}&output=json&fl=timestamp&filter=statuscode:200"
-        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        # Using limit=-1 ensures we only pull the absolute latest snapshot, preventing the 20-second search timeout
+        cdx_url = (
+            f"https://web.archive.org/cdx/search/cdx"
+            f"?url={urllib.parse.quote(excel)}"
+            f"&output=json"
+            f"&fl=timestamp"
+            f"&filter=statuscode:200"
+            f"&limit=-1" 
+        )
+        # Timeout strictly extended to 60s to account for Archive backend load
+        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
         if r_cdx.status_code == 200:
             data = r_cdx.json()
             if len(data) > 1: 
-                # Grab the absolute latest archived timestamp array[-1]
+                # data[-1][0] gets the timestamp of the latest snapshot entry returned
                 latest_timestamp = data[-1][0]
                 wayback_url = f"https://web.archive.org/web/{latest_timestamp}id_/{excel}"
-                r_wb = requests.get(wayback_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+                print(f"Found CDX Snapshot: {wayback_url}")
+                r_wb = requests.get(wayback_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
                 if r_wb.status_code == 200 and is_excel(r_wb.content):
                     b = BytesIO(r_wb.content)
                     print("Successfully downloaded Excel via Wayback Machine CDX API.")
+                else:
+                    print(f"Wayback machine file fetch returned status {r_wb.status_code}")
+            else:
+                print("Wayback Machine CDX returned no valid snapshots.")
+        else:
+            print(f"Wayback Machine CDX API returned status {r_cdx.status_code}")
     except Exception as e:
         print(f"Wayback Machine failed: {e}")
 
+# Catch-all exception if IP is fully locked down and CDX is completely unreachable.
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
