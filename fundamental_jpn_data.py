@@ -373,72 +373,71 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES
+# JAPAN RETAIL SALES (curl_cffi WAF Bypass Implementation)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
+referer = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
 
 def is_excel(b_content):
     # Validates if content is a valid binary Excel file signature
     return b_content.startswith(b'\xd0\xcf\x11\xe0') or b_content.startswith(b'PK')
 
 b = None
-
-# We loop through highly varied User-Agents to confuse WAF blocks,
-# including honest curl/wget signatures that WAFs often whitelist for APIs.
-agents = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-    "curl/7.81.0",
-    "Wget/1.21.2"
-]
-
 print("Fetching Japan Retail Sales Excel...")
 
-for ua in agents:
-    if b is not None: break
-    
-    # Strategy 1: Python Requests
+# Strategy 1: curl_cffi (Native TLS fingerprint spoofing to bypass METI's WAF)
+if b is None:
     try:
-        r = requests.get(excel, headers={"User-Agent": ua, "Referer": "https://www.meti.go.jp/"}, timeout=15)
+        from curl_cffi import requests as cffi_requests
+        print("Attempting curl_cffi (Chrome impersonation)...")
+        r = cffi_requests.get(
+            excel, 
+            impersonate="chrome", 
+            headers={"Referer": referer},
+            timeout=30
+        )
         if r.status_code == 200 and is_excel(r.content):
             b = BytesIO(r.content)
-            print(f"Success with requests [UA: {ua}]")
-            break
-    except: pass
-    
-    # Strategy 2: Urllib
+            print("Successfully downloaded Excel via curl_cffi.")
+        else:
+            print(f"curl_cffi returned non-Excel content. Status: {r.status_code}")
+    except ImportError:
+        print("curl_cffi is not installed. Skipping Strategy 1.")
+    except Exception as e:
+        print(f"curl_cffi failed: {e}")
+
+# Strategy 2: Standard Requests with session cookies
+if b is None:
     try:
-        req = urllib.request.Request(excel, headers={"User-Agent": ua})
-        with urllib.request.urlopen(req, timeout=15) as response:
+        print("Attempting requests Session...")
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        session.headers.update({"Referer": referer})
+        session.get(referer, timeout=30)
+        r = session.get(excel, timeout=30)
+        if r.status_code == 200 and is_excel(r.content):
+            b = BytesIO(r.content)
+            print("Successfully downloaded Excel via requests Session.")
+    except Exception as e:
+        print(f"requests Session failed: {e}")
+
+# Strategy 3: urllib
+if b is None:
+    try:
+        print("Attempting urllib...")
+        req = urllib.request.Request(excel, headers={"User-Agent": HEADERS["User-Agent"], "Referer": referer})
+        with urllib.request.urlopen(req, timeout=30) as response:
             content = response.read()
             if is_excel(content):
                 b = BytesIO(content)
-                print(f"Success with urllib [UA: {ua}]")
-                break
-    except: pass
+                print("Successfully downloaded Excel via urllib.")
+    except Exception as e:
+        print(f"urllib failed: {e}")
 
-    # Strategy 3: curl Native Subprocess
-    try:
-        res = subprocess.run(["curl", "-sL", "-H", f"User-Agent: {ua}", excel], capture_output=True, timeout=15)
-        if res.returncode == 0 and is_excel(res.stdout):
-            b = BytesIO(res.stdout)
-            print(f"Success with curl [UA: {ua}]")
-            break
-    except: pass
-    
-    # Strategy 4: wget Native Subprocess
-    try:
-        res = subprocess.run(["wget", "-qO-", f"--user-agent={ua}", excel], capture_output=True, timeout=15)
-        if res.returncode == 0 and is_excel(res.stdout):
-            b = BytesIO(res.stdout)
-            print(f"Success with wget [UA: {ua}]")
-            break
-    except: pass
-
-# Strategy 5: Internet Archive CDX API Fallback (Guaranteed to bypass WAF, avoiding 429 redirects)
+# Strategy 4: Wayback Machine CDX API Fallback (Guaranteed to bypass WAF, avoiding 429 redirects)
 if b is None:
-    print("Direct fetches failed WAF. Attempting Internet Archive CDX API fallback...")
     try:
+        print("Attempting Wayback Machine...")
         cdx_url = f"http://web.archive.org/cdx/search/cdx?url={urllib.parse.quote(excel)}&output=json&fl=timestamp&filter=statuscode:200"
         r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
         if r_cdx.status_code == 200:
@@ -447,13 +446,12 @@ if b is None:
                 # Grab the absolute latest archived timestamp array[-1]
                 latest_timestamp = data[-1][0]
                 wayback_url = f"https://web.archive.org/web/{latest_timestamp}id_/{excel}"
-                print(f"Found CDX Snapshot: {wayback_url}")
                 r_wb = requests.get(wayback_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
                 if r_wb.status_code == 200 and is_excel(r_wb.content):
                     b = BytesIO(r_wb.content)
-                    print("Success with Wayback Machine CDX fetch.")
+                    print("Successfully downloaded Excel via Wayback Machine CDX API.")
     except Exception as e:
-        print(f"Wayback Machine API failed: {e}")
+        print(f"Wayback Machine failed: {e}")
 
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
