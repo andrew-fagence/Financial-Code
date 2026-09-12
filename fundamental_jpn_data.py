@@ -375,39 +375,65 @@ print("\nJapan Real GDP updated successfully")
 # JAPAN RETAIL SALES
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
-
-# The METI website blocks the 'requests' library on GitHub Actions.
-# We use urllib.request with a Referer header to bypass the 403 Forbidden error.
-# If direct access fails, we gracefully fallback to open CORS proxies.
 req_headers = HEADERS.copy()
 req_headers["Referer"] = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
 
+def is_excel(b_content):
+    # .xls files start with OLE2 signature D0 CF 11 E0
+    # .xlsx files start with PK (50 4B)
+    return b_content.startswith(b'\xd0\xcf\x11\xe0') or b_content.startswith(b'PK')
+
+b = None
+
+# Attempt 1: Using requests.Session to maintain cookies (often resolves WAF 403s on METI)
 try:
-    req = urllib.request.Request(excel, headers=req_headers)
-    with urllib.request.urlopen(req, timeout=60) as response:
-        b = BytesIO(response.read())
+    session = requests.Session()
+    session.headers.update(req_headers)
+    session.get("https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html", timeout=60)
+    r = session.get(excel, timeout=60)
+    r.raise_for_status()
+    if is_excel(r.content):
+        b = BytesIO(r.content)
+    else:
+        raise Exception("Direct download returned non-Excel HTML/WAF content.")
 except Exception as e:
-    print(f"Direct download failed ({e}). Trying proxies...")
-    encoded_excel = urllib.parse.quote(excel, safe='')
-    proxies = [
-        f"https://corsproxy.io/?{excel}",
-        f"https://api.allorigins.win/raw?url={encoded_excel}",
-        f"https://api.codetabs.com/v1/proxy?quest={excel}"
-    ]
+    print(f"Direct session download failed ({e}). Trying urllib...")
     
-    success = False
-    for p in proxies:
-        try:
-            r = requests.get(p, headers=HEADERS, timeout=60)
-            r.raise_for_status()
-            b = BytesIO(r.content)
-            success = True
-            break
-        except Exception as proxy_e:
-            print(f"Proxy {p} failed: {proxy_e}")
-            
-    if not success:
-        raise Exception("All download attempts for Japan Retail Sales failed.")
+    # Attempt 2: Using urllib.request as fallback
+    try:
+        req = urllib.request.Request(excel, headers=req_headers)
+        with urllib.request.urlopen(req, timeout=60) as response:
+            content = response.read()
+            if is_excel(content):
+                b = BytesIO(content)
+            else:
+                raise Exception("urllib returned non-Excel HTML/WAF content.")
+    except Exception as e2:
+        print(f"urllib download failed ({e2}). Trying proxies...")
+        
+        # Attempt 3: Proxies with strict binary validation
+        encoded_excel = urllib.parse.quote(excel, safe='')
+        proxies = [
+            f"https://api.allorigins.win/raw?url={encoded_excel}",
+            f"https://api.codetabs.com/v1/proxy?quest={excel}",
+            f"https://corsproxy.io/?{excel}"
+        ]
+        
+        for p in proxies:
+            try:
+                r = requests.get(p, headers=HEADERS, timeout=60)
+                r.raise_for_status()
+                if is_excel(r.content):
+                    b = BytesIO(r.content)
+                    print(f"Successfully downloaded Excel via proxy: {p}")
+                    break
+                else:
+                    print(f"Proxy {p} returned invalid content (not an Excel file). Skipping...")
+            except Exception as proxy_e:
+                print(f"Proxy {p} failed: {proxy_e}")
+
+if b is None:
+    raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
 def load_series(sheet_name):
     x = pd.read_excel(b, sheet_name=sheet_name, header=None)
