@@ -379,7 +379,6 @@ print("\nJapan Real GDP updated successfully")
 print("\nFetching Japan Retail Sales...")
 
 def get_estat_retail():
-    # Strategy 1: Fetch exact statsDataId via E-Stat API cleanly
     APP_ID = "b0bc8765e50cb21888f0bfc4aa3189a2aab22ae7"
     list_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsList?appId={APP_ID}&statsCode=00550030"
     
@@ -398,16 +397,16 @@ def get_estat_retail():
                 
             for t in tables:
                 if not isinstance(t, dict): continue
-                # Safely parse TITLE which E-stat occasionally serves as a pure string instead of dict
                 title_obj = t.get("TITLE", "")
                 title = title_obj.get("$", "") if isinstance(title_obj, dict) else str(title_obj)
                 
                 if "業種別商業販売額" in title and ("時系列" in title or "月次" in title):
                     extracted_id = t.get("@id")
-                    if extracted_id: target_id = extracted_id
-                    break
+                    if extracted_id: 
+                        target_id = extracted_id
+                        break
     except Exception as e:
-        print(f"Warning: Failed to search E-Stat API for dynamic table ID, using fallback ID {target_id}. Error: {e}")
+        print(f"Warning: Failed to search E-Stat API for dynamic table ID. Continuing with default. Error: {e}")
         
     data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
     r = requests.get(data_url, headers=HEADERS, timeout=60)
@@ -423,6 +422,7 @@ def get_estat_retail():
     retail_code = None
     cat_id = None
     
+    # Robust "Fuzzy" search algorithm traversing the nested JSON structure
     for c in class_objs:
         if not isinstance(c, dict): continue
         c_id = c.get("@id")
@@ -434,15 +434,23 @@ def get_estat_retail():
             
         for cls in classes:
             if not isinstance(cls, dict): continue
-            name = cls.get("@name", "")
-            if name in ["小売業", "小売業計"] or ("小売業" in name and "自動車" not in name):
+            name = str(cls.get("@name", ""))
+            
+            # Look for exact or fuzzy representations of aggregate retail sales
+            if name in ["小売業", "小売業計", "小売", "小売業（販売額）"]:
                 retail_code = cls.get("@code")
                 cat_id = c_id
                 break
+                
+            # Fallback if specific words aren't matching perfectly
+            if not retail_code and "小売" in name and not any(x in name for x in ["自動車", "機械", "燃料", "医薬", "飲食", "織物", "その他", "無店舗"]):
+                retail_code = cls.get("@code")
+                cat_id = c_id
+                
         if retail_code: break
             
     if not retail_code:
-        raise Exception("Could not find '小売業' category code in E-Stat dataset.")
+        raise Exception("Could not dynamically find '小売業' category code in E-Stat dataset.")
         
     values = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("DATA_INF", {}).get("VALUE", [])
     if not isinstance(values, list):
@@ -463,61 +471,60 @@ def get_estat_retail():
                     if pd.notna(val):
                         rows.append([pd.Timestamp(int(year), int(month), 1), val])
                         
-    df = pd.DataFrame(rows, columns=["date", "retail"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    df = pd.DataFrame(rows, columns=["date", "retail"])
+    
+    # E-stat often includes multiple dimensions (e.g. Raw and Seasonally Adjusted) under the same time key
+    # Group by date and take the first valid figure
+    df = df.groupby("date")["retail"].first().reset_index()
+    df = df.sort_values("date").reset_index(drop=True)
+    
     if len(df) < 12:
         raise Exception("Not enough data points extracted from E-Stat API.")
         
     return df
 
 def get_meti_excel_fallback():
-    # Strategy 2: Dynamically parse METI HTML using curl_cffi to bypass robust WAF blocking
     try:
         from curl_cffi import requests as cffi_requests
     except ImportError:
-        print("Installing curl_cffi for METI WAF bypass...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
         from curl_cffi import requests as cffi_requests
         
     try:
         from bs4 import BeautifulSoup
     except ImportError:
-        print("Installing beautifulsoup4...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
         from bs4 import BeautifulSoup
-        
-    # Attempt direct downloads with impersonation first
-    excel_urls = [
-        "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xlsx",
-        "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
+
+    # METI frequently moves these pages; checking all known historic URL paths
+    urls_to_check = [
+        "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html",
+        "https://www.meti.go.jp/statistics/tyo/syoudou/result-2/index.html",
+        "https://www.meti.go.jp/statistics/tyo/syoudou/result/index.html"
     ]
     
-    for excel in excel_urls:
+    excel_url = None
+    for url in urls_to_check:
         try:
-            r_direct = cffi_requests.get(excel, impersonate="chrome120", headers={"Referer": "https://www.meti.go.jp/"}, timeout=30)
-            if r_direct.status_code == 200 and (r_direct.content.startswith(b'PK') or r_direct.content.startswith(b'\xd0')):
-                return BytesIO(r_direct.content)
+            r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                for link in soup.find_all('a'):
+                    href = link.get('href', '')
+                    text = link.get_text()
+                    # .xls will match both .xls and .xlsx extensions
+                    if '.xls' in href:
+                        if '業種別' in text or '商業販売' in text or '小売' in text or '時系列' in text or 'h2a' in href:
+                            excel_url = urllib.parse.urljoin(url, href)
+                            break
+            if excel_url: break
         except Exception:
             pass
-
-    # If direct downloads fail, dynamically scrape the webpage
-    url = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
-    r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
-    r.raise_for_status()
-        
-    soup = BeautifulSoup(r.text, 'html.parser')
-    excel_url = None
-    
-    for link in soup.find_all('a'):
-        href = link.get('href', '')
-        text = link.get_text()
-        if (href.endswith('.xlsx') or href.endswith('.xls')) and ('業種別' in text or 'h2a' in href or '時系列' in text or '販売額' in text):
-            excel_url = urllib.parse.urljoin(url, href)
-            break
             
     if not excel_url:
-        raise Exception("Could not find dynamic Excel link on METI page.")
+        raise Exception("Could not dynamically find Excel link on any known METI page.")
         
-    r_excel = cffi_requests.get(excel_url, impersonate="chrome120", headers={"Referer": url}, timeout=45)
+    r_excel = cffi_requests.get(excel_url, impersonate="chrome120", headers={"Referer": "https://www.meti.go.jp/"}, timeout=45)
     if r_excel.status_code == 200 and (r_excel.content.startswith(b'PK') or r_excel.content.startswith(b'\xd0')):
         return BytesIO(r_excel.content)
         
@@ -600,7 +607,7 @@ except Exception as e:
     try:
         b_excel = get_meti_excel_fallback()
         monthly_retail = load_series(b_excel)
-        print("Successfully retrieved Retail Sales via METI WAF Bypass fallback.")
+        print("Successfully retrieved Retail Sales via METI HTML Scraper fallback.")
     except Exception as e2:
         print(f"METI Excel fallback method failed: {e2}")
         raise Exception("All download attempts for Japan Retail Sales completely failed.")
