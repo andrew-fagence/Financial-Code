@@ -373,7 +373,7 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (Robust Multi-Strategy Scraper)
+# JAPAN RETAIL SALES (Robust Multi-Layer Scraper)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 
@@ -384,14 +384,32 @@ def is_excel(b_content):
 b = None
 print("Fetching Japan Retail Sales Excel...")
 
-# Strategy 1: Aggressive E-Stat Deep Regex Scraping
+# Strategy 1: Public CORS Proxies (Direct METI WAF Bypass)
+# This routes the request through highly-trusted datacenter APIs to dodge Cloudflare block
+if b is None:
+    print("Attempting Public CORS Proxies for direct download...")
+    cors_proxies = [
+        f"https://corsproxy.io/?{urllib.parse.quote(excel)}",
+        f"https://api.allorigins.win/raw?url={urllib.parse.quote(excel)}"
+    ]
+    for proxy_url in cors_proxies:
+        if b is not None: break
+        try:
+            r_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            if r_proxy.status_code == 200 and is_excel(r_proxy.content):
+                b = BytesIO(r_proxy.content)
+                print(f"Successfully downloaded Excel via CORS proxy: {proxy_url.split('/')[2]}")
+        except Exception as e:
+            print(f"Proxy {proxy_url.split('/')[2]} failed: {e}")
+
+# Strategy 2: E-stat Aggressive SPA JSON Scrape 
+# Bypasses the HTML Document layer and scans internal Javascript/JSON state for file IDs
 if b is None:
     try:
-        print("Attempting E-stat aggressive deep regex scrape for Japan Retail Sales...")
-        # Search time-series data portals for the file IDs
+        print("Attempting E-stat SPA JSON deep scrape for Japan Retail Sales...")
         search_urls = [
+            "https://www.e-stat.go.jp/stat-search/api/v1/layoutData?page=1&toukei=00550030&tstat=000001019842",
             "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030&tstat=000001019842",
-            "https://www.e-stat.go.jp/stat-search/files?page=2&toukei=00550030&tstat=000001019842",
             "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030"
         ]
         
@@ -400,29 +418,30 @@ if b is None:
             try:
                 r_s = requests.get(s_url, headers=HEADERS, timeout=15)
                 if r_s.status_code == 200:
-                    # Match standard 12-digit E-stat IDs starting with 0000 across SPA JSON payload
-                    matches = re.findall(r'(0000\d{8})', r_s.text)
-                    matches += re.findall(r'statInfId[=:"\']+([0-9]+)', r_s.text)
+                    # Dynamically match Nuxt JSON keys e.g., statInfId:"0003348239" or statInfId=0003348239
+                    matches = re.findall(r'statInfId["\']?\s*[:=]\s*["\']?([0-9]+)["\']?', r_s.text)
+                    # Broad fallback for isolated 10-12 digit numerical sequences in the payload
+                    matches += re.findall(r'"([0-9]{10,12})"', r_s.text)
+                    
                     for m in matches:
                         if m not in stat_ids:
                             stat_ids.append(m)
             except Exception as e:
-                print(f"Failed to fetch ID list from {s_url}: {e}")
+                pass
                 
         print(f"Found {len(stat_ids)} potential Excel files on E-stat. Checking structure...")
         
-        # Test each file in sequence. 
-        for stat_id in stat_ids[:25]: 
+        for stat_id in stat_ids[:40]: 
             try:
                 excel_url = f"https://www.e-stat.go.jp/stat-search/file-download?statInfId={stat_id}&fileKind=0"
-                r_excel = requests.get(excel_url, headers=HEADERS, timeout=5)
+                r_excel = requests.get(excel_url, headers=HEADERS, timeout=7)
                 if r_excel.status_code == 200 and is_excel(r_excel.content):
                     b_temp = BytesIO(r_excel.content)
                     try:
                         xl = pd.ExcelFile(b_temp)
                         fallback = [s for s in xl.sheet_names if "季調済" in s and "月次" in s]
                         if "季調済指数(Seasonaly adjusted)（月次M）" in xl.sheet_names or fallback:
-                            b = BytesIO(r_excel.content) # Instantiate clean stream
+                            b = BytesIO(r_excel.content)
                             print(f"Successfully located Retail Sales Excel on E-stat (statInfId={stat_id}).")
                             break
                     except Exception:
@@ -433,37 +452,30 @@ if b is None:
         if b is None:
             print("Could not find the Retail Sales Excel file in the scanned E-stat endpoints.")
     except Exception as e:
-        print(f"E-stat deep regex scrape failed: {e}")
+        print(f"E-stat deep SPA scrape failed: {e}")
 
-# Strategy 2: Free Proxy Rotation (Cloudflare Bypass for METI original URL)
+# Strategy 3: curl_cffi with upgraded impersonation (chrome120)
 if b is None:
     try:
-        print("Attempting Free Proxy Rotation to bypass METI WAF...")
-        proxy_url = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
-        pr = requests.get(proxy_url, timeout=15)
-        if pr.status_code == 200:
-            proxies_list = [p.strip() for p in pr.text.split('\n') if p.strip()]
-            import random
-            random.shuffle(proxies_list)
-            
-            for p in proxies_list[:15]: 
-                try:
-                    res = requests.get(
-                        excel,
-                        headers=HEADERS,
-                        proxies={"http": f"http://{p}", "https": f"http://{p}"},
-                        timeout=7
-                    )
-                    if res.status_code == 200 and is_excel(res.content):
-                        b = BytesIO(res.content)
-                        print(f"Successfully downloaded Excel via proxy {p}.")
-                        break
-                except Exception:
-                    continue
+        from curl_cffi import requests as cffi_requests
+        print("Attempting curl_cffi (Chrome 120 impersonation)...")
+        r = cffi_requests.get(
+            excel, 
+            impersonate="chrome120", 
+            headers={"Referer": "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"},
+            timeout=30
+        )
+        if r.status_code == 200 and is_excel(r.content):
+            b = BytesIO(r.content)
+            print("Successfully downloaded Excel via curl_cffi.")
+        else:
+            print(f"curl_cffi returned status: {r.status_code}")
+    except ImportError:
+        print("curl_cffi is not installed. Skipping.")
     except Exception as e:
-        print(f"Proxy rotation failed: {e}")
+        print(f"curl_cffi failed: {e}")
 
-# Strategy 3: Wayback Machine CDX API Fallback (Unfiltered)
+# Strategy 4: Wayback Machine CDX API Fallback (Unfiltered)
 if b is None:
     try:
         print("Attempting Wayback Machine...")
@@ -472,9 +484,8 @@ if b is None:
             f"?url={urllib.parse.quote(excel)}"
             f"&output=json"
             f"&fl=timestamp"
-            f"&limit=-1" 
         )
-        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         if r_cdx.status_code == 200:
             data = r_cdx.json()
             if len(data) > 1: 
@@ -489,8 +500,6 @@ if b is None:
                     print(f"Wayback machine file fetch returned status {r_wb.status_code}")
             else:
                 print("Wayback Machine CDX returned no valid snapshots.")
-        else:
-            print(f"Wayback Machine CDX API returned status {r_cdx.status_code}")
     except Exception as e:
         print(f"Wayback Machine failed: {e}")
 
@@ -499,7 +508,6 @@ if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
 def load_series(sheet_name):
-    # Added defensive programming to locate the right sheet in case METI modified it slightly
     b.seek(0)
     try:
         x = pd.read_excel(b, sheet_name=sheet_name, header=None)
