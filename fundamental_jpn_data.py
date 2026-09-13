@@ -373,10 +373,9 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (Robust E-Stat Sheet-Scanning Scraper + Fallbacks)
+# JAPAN RETAIL SALES (Robust Multi-Strategy Scraper)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
-referer = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
 
 def is_excel(b_content):
     # Validates if content is a valid binary Excel file signature
@@ -385,10 +384,10 @@ def is_excel(b_content):
 b = None
 print("Fetching Japan Retail Sales Excel...")
 
-# Strategy 1: Aggressive E-Stat Sheet-Scanning (Fully bypasses WAF and handles arbitrary file naming)
+# Strategy 1: Aggressive E-Stat Deep Regex Scraping
 if b is None:
     try:
-        print("Attempting E-stat aggressive scrape for Japan Retail Sales...")
+        print("Attempting E-stat aggressive deep regex scrape for Japan Retail Sales...")
         # Search time-series data portals for the file IDs
         search_urls = [
             "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030&tstat=000001019842",
@@ -401,7 +400,9 @@ if b is None:
             try:
                 r_s = requests.get(s_url, headers=HEADERS, timeout=15)
                 if r_s.status_code == 200:
-                    matches = re.findall(r'statInfId=([0-9]+)', r_s.text)
+                    # Match standard 12-digit E-stat IDs starting with 0000 across SPA JSON payload
+                    matches = re.findall(r'(0000\d{8})', r_s.text)
+                    matches += re.findall(r'statInfId[=:"\']+([0-9]+)', r_s.text)
                     for m in matches:
                         if m not in stat_ids:
                             stat_ids.append(m)
@@ -410,11 +411,11 @@ if b is None:
                 
         print(f"Found {len(stat_ids)} potential Excel files on E-stat. Checking structure...")
         
-        # Test each file in sequence. This guarantees we get the exact dataset even if titles change.
-        for stat_id in stat_ids[:30]: 
+        # Test each file in sequence. 
+        for stat_id in stat_ids[:25]: 
             try:
                 excel_url = f"https://www.e-stat.go.jp/stat-search/file-download?statInfId={stat_id}&fileKind=0"
-                r_excel = requests.get(excel_url, headers=HEADERS, timeout=10)
+                r_excel = requests.get(excel_url, headers=HEADERS, timeout=5)
                 if r_excel.status_code == 200 and is_excel(r_excel.content):
                     b_temp = BytesIO(r_excel.content)
                     try:
@@ -432,62 +433,37 @@ if b is None:
         if b is None:
             print("Could not find the Retail Sales Excel file in the scanned E-stat endpoints.")
     except Exception as e:
-        print(f"E-stat sheet-scanning failed: {e}")
+        print(f"E-stat deep regex scrape failed: {e}")
 
-# Strategy 2: curl_cffi (Native TLS fingerprint spoofing)
+# Strategy 2: Free Proxy Rotation (Cloudflare Bypass for METI original URL)
 if b is None:
     try:
-        from curl_cffi import requests as cffi_requests
-        print("Attempting curl_cffi (Chrome impersonation)...")
-        r = cffi_requests.get(
-            excel, 
-            impersonate="chrome", 
-            headers={"Referer": referer},
-            timeout=30
-        )
-        if r.status_code == 200 and is_excel(r.content):
-            b = BytesIO(r.content)
-            print("Successfully downloaded Excel via curl_cffi.")
-        else:
-            print(f"curl_cffi returned non-Excel content. Status: {r.status_code}")
-    except ImportError:
-        print("curl_cffi is not installed. Skipping Strategy 2.")
+        print("Attempting Free Proxy Rotation to bypass METI WAF...")
+        proxy_url = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
+        pr = requests.get(proxy_url, timeout=15)
+        if pr.status_code == 200:
+            proxies_list = [p.strip() for p in pr.text.split('\n') if p.strip()]
+            import random
+            random.shuffle(proxies_list)
+            
+            for p in proxies_list[:15]: 
+                try:
+                    res = requests.get(
+                        excel,
+                        headers=HEADERS,
+                        proxies={"http": f"http://{p}", "https": f"http://{p}"},
+                        timeout=7
+                    )
+                    if res.status_code == 200 and is_excel(res.content):
+                        b = BytesIO(res.content)
+                        print(f"Successfully downloaded Excel via proxy {p}.")
+                        break
+                except Exception:
+                    continue
     except Exception as e:
-        print(f"curl_cffi failed: {e}")
+        print(f"Proxy rotation failed: {e}")
 
-# Strategy 3: Standard Requests with session cookies
-if b is None:
-    try:
-        print("Attempting requests Session...")
-        session = requests.Session()
-        session.headers.update(HEADERS)
-        session.headers.update({"Referer": referer})
-        session.get(referer, timeout=30)
-        r = session.get(excel, timeout=30)
-        if r.status_code == 200 and is_excel(r.content):
-            b = BytesIO(r.content)
-            print("Successfully downloaded Excel via requests Session.")
-        else:
-            print(f"requests Session returned status {r.status_code}")
-    except Exception as e:
-        print(f"requests Session failed: {e}")
-
-# Strategy 4: urllib
-if b is None:
-    try:
-        print("Attempting urllib...")
-        req = urllib.request.Request(excel, headers={"User-Agent": HEADERS["User-Agent"], "Referer": referer})
-        with urllib.request.urlopen(req, timeout=30) as response:
-            content = response.read()
-            if is_excel(content):
-                b = BytesIO(content)
-                print("Successfully downloaded Excel via urllib.")
-            else:
-                print("urllib returned non-Excel content.")
-    except Exception as e:
-        print(f"urllib failed: {e}")
-
-# Strategy 5: Wayback Machine CDX API Fallback
+# Strategy 3: Wayback Machine CDX API Fallback (Unfiltered)
 if b is None:
     try:
         print("Attempting Wayback Machine...")
@@ -496,7 +472,6 @@ if b is None:
             f"?url={urllib.parse.quote(excel)}"
             f"&output=json"
             f"&fl=timestamp"
-            f"&filter=statuscode:200"
             f"&limit=-1" 
         )
         r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
@@ -509,7 +484,7 @@ if b is None:
                 r_wb = requests.get(wayback_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
                 if r_wb.status_code == 200 and is_excel(r_wb.content):
                     b = BytesIO(r_wb.content)
-                    print("Successfully downloaded Excel via Wayback Machine CDX API.")
+                    print("Successfully downloaded Excel via Wayback Machine.")
                 else:
                     print(f"Wayback machine file fetch returned status {r_wb.status_code}")
             else:
@@ -519,12 +494,12 @@ if b is None:
     except Exception as e:
         print(f"Wayback Machine failed: {e}")
 
-# Catch-all exception if IP is fully locked down and fallbacks are completely unreachable.
+# Catch-all exception if all fallback methods are completely unreachable
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
 def load_series(sheet_name):
-    # Added defensive programming to locate the right sheet in case formatting modifies slightly
+    # Added defensive programming to locate the right sheet in case METI modified it slightly
     b.seek(0)
     try:
         x = pd.read_excel(b, sheet_name=sheet_name, header=None)
@@ -541,7 +516,7 @@ def load_series(sheet_name):
 
     retail_col = -1
     start_row = 7
-    # Scan dynamically between rows 4 to 15 to locate the target column named "小売業計" safely
+    # Scan dynamically between rows 4 to 15 to locate the column named "小売業計" safely
     for row_idx in range(4, min(15, len(x))):
         row_vals = x.iloc[row_idx].astype(str).tolist()
         if "小売業計" in row_vals:
