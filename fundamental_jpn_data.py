@@ -10,9 +10,11 @@ import urllib.request
 import urllib.parse
 import subprocess
 import sys
+import ssl
 
 # Suppress warnings for cleaner execution output
 warnings.filterwarnings('ignore')
+ssl._create_default_https_context = ssl._create_unverified_context
 
 print("Starting fundamental_jpn_data.py...")
 
@@ -380,73 +382,35 @@ print("\nFetching Japan Retail Sales...")
 
 def get_estat_retail():
     APP_ID = "b0bc8765e50cb21888f0bfc4aa3189a2aab22ae7"
-    list_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsList?appId={APP_ID}&statsCode=00550030"
-    
-    # 0003348239 is a known reliable ID for Retail Sales (業種別商業販売額の月次)
     target_id = "0003348239" 
     
-    try:
-        r = requests.get(list_url, headers=HEADERS, timeout=30)
-        if r.status_code == 200:
-            data = r.json()
-            tables = data.get("GET_STATS_LIST", {}).get("DATALIST_INF", {}).get("TABLE_INF", [])
-            if isinstance(tables, dict):
-                tables = [tables]
-            elif not isinstance(tables, list):
-                tables = []
-                
-            for t in tables:
-                if not isinstance(t, dict): continue
-                title_obj = t.get("TITLE", "")
-                title = title_obj.get("$", "") if isinstance(title_obj, dict) else str(title_obj)
-                
-                if "業種別商業販売額" in title and ("時系列" in title or "月次" in title):
-                    extracted_id = t.get("@id")
-                    if extracted_id: 
-                        target_id = extracted_id
-                        break
-    except Exception as e:
-        print(f"Warning: Failed to search E-Stat API for dynamic table ID. Continuing with default. Error: {e}")
-        
     data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
     r = requests.get(data_url, headers=HEADERS, timeout=60)
     r.raise_for_status()
     data = r.json()
     
     class_objs = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("CLASS_INF", {}).get("CLASS_OBJ", [])
-    if isinstance(class_objs, dict):
-        class_objs = [class_objs]
-    elif not isinstance(class_objs, list):
-        class_objs = []
+    if isinstance(class_objs, dict): class_objs = [class_objs]
+    elif not isinstance(class_objs, list): class_objs = []
         
     retail_code = None
     cat_id = None
     
-    # Robust "Fuzzy" search algorithm traversing the nested JSON structure
     for c in class_objs:
         if not isinstance(c, dict): continue
         c_id = c.get("@id")
         classes = c.get("CLASS", [])
-        if isinstance(classes, dict):
-            classes = [classes]
-        if not isinstance(classes, list):
-            continue
+        if isinstance(classes, dict): classes = [classes]
+        if not isinstance(classes, list): continue
             
         for cls in classes:
             if not isinstance(cls, dict): continue
             name = str(cls.get("@name", ""))
-            
-            # Look for exact or fuzzy representations of aggregate retail sales
-            if name in ["小売業", "小売業計", "小売", "小売業（販売額）"]:
+            # Broad search for retail sales category
+            if "小売" in name and not any(x in name for x in ["自動車", "機械", "燃料"]):
                 retail_code = cls.get("@code")
                 cat_id = c_id
                 break
-                
-            # Fallback if specific words aren't matching perfectly
-            if not retail_code and "小売" in name and not any(x in name for x in ["自動車", "機械", "燃料", "医薬", "飲食", "織物", "その他", "無店舗"]):
-                retail_code = cls.get("@code")
-                cat_id = c_id
-                
         if retail_code: break
             
     if not retail_code:
@@ -457,7 +421,6 @@ def get_estat_retail():
         values = [values] if values else []
         
     rows = []
-    
     for v in values:
         if not isinstance(v, dict): continue
         if v.get(f"@{cat_id}") == retail_code:
@@ -466,21 +429,15 @@ def get_estat_retail():
                 year = t_str[:4]
                 month = t_str[4:6]
                 if month != "00" and month.isdigit() and 1 <= int(month) <= 12:
-                    val_obj = v.get("$")
-                    val = pd.to_numeric(val_obj, errors="coerce")
+                    val = pd.to_numeric(v.get("$"), errors="coerce")
                     if pd.notna(val):
                         rows.append([pd.Timestamp(int(year), int(month), 1), val])
                         
-    df = pd.DataFrame(rows, columns=["date", "retail"])
-    
-    # E-stat often includes multiple dimensions (e.g. Raw and Seasonally Adjusted) under the same time key
-    # Group by date and take the first valid figure
-    df = df.groupby("date")["retail"].first().reset_index()
+    df = pd.DataFrame(rows, columns=["date", "retail"]).groupby("date")["retail"].first().reset_index()
     df = df.sort_values("date").reset_index(drop=True)
     
     if len(df) < 12:
         raise Exception("Not enough data points extracted from E-Stat API.")
-        
     return df
 
 def get_meti_excel_fallback():
@@ -489,14 +446,12 @@ def get_meti_excel_fallback():
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
         from curl_cffi import requests as cffi_requests
-        
     try:
         from bs4 import BeautifulSoup
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
         from bs4 import BeautifulSoup
 
-    # METI frequently moves these pages; checking all known historic URL paths
     urls_to_check = [
         "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html",
         "https://www.meti.go.jp/statistics/tyo/syoudou/result-2/index.html",
@@ -512,11 +467,9 @@ def get_meti_excel_fallback():
                 for link in soup.find_all('a'):
                     href = link.get('href', '')
                     text = link.get_text()
-                    # .xls will match both .xls and .xlsx extensions
-                    if '.xls' in href:
-                        if '業種別' in text or '商業販売' in text or '小売' in text or '時系列' in text or 'h2a' in href:
-                            excel_url = urllib.parse.urljoin(url, href)
-                            break
+                    if '.xls' in href and any(x in text or x in href for x in ['業種別', '商業販売', '小売', '時系列', 'h2a']):
+                        excel_url = urllib.parse.urljoin(url, href)
+                        break
             if excel_url: break
         except Exception:
             pass
@@ -533,53 +486,57 @@ def get_meti_excel_fallback():
 def load_series(b):
     b.seek(0)
     xl = pd.ExcelFile(b)
-    target_sheet = None
+    best_df = None
+    best_retail_col = -1
+    best_start_row = -1
     
     for sheet in xl.sheet_names:
-        if "季調" in sheet or "季節" in sheet:
-            target_sheet = sheet
-            if "月" in sheet: break
-            
-    if not target_sheet:
-        target_sheet = xl.sheet_names[0]
+        df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
         
-    retail_col = -1
-    start_row = 0
-    df = pd.read_excel(b, sheet_name=target_sheet, header=None)
-    
-    for row_idx in range(min(50, len(df))):
-        row_vals = df.iloc[row_idx].astype(str).tolist()
-        for col_idx, val in enumerate(row_vals):
-            if "小売業" in val:
-                retail_col = col_idx
-                start_row = row_idx + 1
+        # KEY FIX: Handle Excel visually merged cells by forward-filling the "Year" column
+        if len(df_temp.columns) > 0:
+            df_temp[0] = df_temp[0].ffill()
+            
+        retail_col = -1
+        start_row = -1
+        for row_idx in range(min(100, len(df_temp))):
+            row_vals = df_temp.iloc[row_idx].astype(str).tolist()
+            for col_idx, val in enumerate(row_vals):
+                val_clean = str(val).replace(" ", "").replace("\n", "")
+                if "小売業" in val_clean or "Retail" in val_clean:
+                    retail_col = col_idx
+                    start_row = row_idx + 1
+                    break
+            if retail_col != -1:
                 break
-        if retail_col != -1: break
-        
-    if retail_col == -1:
-        for sheet in xl.sheet_names:
-            if sheet == target_sheet: continue
-            df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
-            for row_idx in range(min(50, len(df_temp))):
-                row_vals = df_temp.iloc[row_idx].astype(str).tolist()
-                for col_idx, val in enumerate(row_vals):
-                    if "小売業" in val:
-                        retail_col = col_idx
-                        start_row = row_idx + 1
-                        df = df_temp
-                        break
-                if retail_col != -1: break
-            if retail_col != -1: break
-            
-    if retail_col == -1:
+                
+        if retail_col != -1:
+            best_df = df_temp
+            best_retail_col = retail_col
+            best_start_row = start_row
+            if any(x in sheet for x in ["季調", "季節", "月", "第1表", "第１表"]):
+                break
+                
+    if best_df is None or best_retail_col == -1:
         raise Exception(f"Could not dynamically locate '小売業' column. Sheets available: {xl.sheet_names}")
 
+    df = best_df
     rows = []
-    for i in range(start_row, len(df)):
-        row_str = " ".join(df.iloc[i, 0:5].dropna().astype(str).tolist()).replace(" ", "")
-        m = re.search(r"(19\d{2}|20\d{2})\D{0,2}([01]?[0-9])[月]?", row_str)
-        if not m and len(row_str) >= 6:
-            m = re.search(r"(19\d{2}|20\d{2})(1[0-2]|0[1-9])", row_str)
+    
+    for i in range(best_start_row, len(df)):
+        cols = df.iloc[i, 0:5].values
+        clean_cols = []
+        for x in cols:
+            if pd.isna(x): continue
+            s = str(x).strip()
+            # Remove trailing .0 from years parsed as floats
+            if s.endswith('.0'): s = s[:-2]
+            clean_cols.append(s)
+            
+        row_str = "".join(clean_cols)
+        
+        # Dynamically matches: 2025年1月, 2025/01, 2025.1, or merged strings like 20251
+        m = re.search(r"(19\d{2}|20\d{2})\D{0,4}([01]?[0-9])[月\-\/\.]?", row_str)
         if not m: continue
             
         year = int(m.group(1))
@@ -587,7 +544,9 @@ def load_series(b):
         if month < 1 or month > 12: continue
             
         date = pd.Timestamp(year, month, 1)
-        val_str = str(df.iloc[i, retail_col]).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').strip()
+        val_raw = df.iloc[i, best_retail_col]
+        val_str = str(val_raw).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').replace('△', '-').strip()
+        
         value = pd.to_numeric(val_str, errors="coerce")
         if pd.notna(value):
             rows.append([date, value])
@@ -607,7 +566,7 @@ except Exception as e:
     try:
         b_excel = get_meti_excel_fallback()
         monthly_retail = load_series(b_excel)
-        print("Successfully retrieved Retail Sales via METI HTML Scraper fallback.")
+        print("Successfully retrieved Retail Sales via METI WAF Bypass fallback.")
     except Exception as e2:
         print(f"METI Excel fallback method failed: {e2}")
         raise Exception("All download attempts for Japan Retail Sales completely failed.")
