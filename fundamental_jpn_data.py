@@ -373,37 +373,34 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (Robust Multi-Layer Scraper)
+# JAPAN RETAIL SALES (Universal Data Scraper + Dynamic Excel Parser)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 
 def is_excel(b_content):
-    # Validates if content is a valid binary Excel file signature
     return b_content.startswith(b'\xd0\xcf\x11\xe0') or b_content.startswith(b'PK')
 
 b = None
 print("Fetching Japan Retail Sales Excel...")
 
 # Strategy 1: Public CORS Proxies (Direct METI WAF Bypass)
-# This routes the request through highly-trusted datacenter APIs to dodge Cloudflare block
 if b is None:
     print("Attempting Public CORS Proxies for direct download...")
     cors_proxies = [
-        f"https://corsproxy.io/?{urllib.parse.quote(excel)}",
-        f"https://api.allorigins.win/raw?url={urllib.parse.quote(excel)}"
+        f"https://api.allorigins.win/raw?url={urllib.parse.quote(excel)}",
+        f"https://corsproxy.io/?{urllib.parse.quote(excel)}"
     ]
     for proxy_url in cors_proxies:
         if b is not None: break
         try:
-            r_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            r_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
             if r_proxy.status_code == 200 and is_excel(r_proxy.content):
                 b = BytesIO(r_proxy.content)
-                print(f"Successfully downloaded Excel via CORS proxy: {proxy_url.split('/')[2]}")
-        except Exception as e:
-            print(f"Proxy {proxy_url.split('/')[2]} failed: {e}")
+                print(f"Successfully downloaded Excel via CORS proxy.")
+        except Exception:
+            pass
 
-# Strategy 2: E-stat Aggressive SPA JSON Scrape 
-# Bypasses the HTML Document layer and scans internal Javascript/JSON state for file IDs
+# Strategy 2: E-stat Aggressive SPA JSON Scrape & Dynamic Content Verification
 if b is None:
     try:
         print("Attempting E-stat SPA JSON deep scrape for Japan Retail Sales...")
@@ -416,17 +413,14 @@ if b is None:
         stat_ids = []
         for s_url in search_urls:
             try:
-                r_s = requests.get(s_url, headers=HEADERS, timeout=15)
+                r_s = requests.get(s_url, headers=HEADERS, timeout=10)
                 if r_s.status_code == 200:
-                    # Dynamically match Nuxt JSON keys e.g., statInfId:"0003348239" or statInfId=0003348239
                     matches = re.findall(r'statInfId["\']?\s*[:=]\s*["\']?([0-9]+)["\']?', r_s.text)
-                    # Broad fallback for isolated 10-12 digit numerical sequences in the payload
                     matches += re.findall(r'"([0-9]{10,12})"', r_s.text)
-                    
                     for m in matches:
                         if m not in stat_ids:
                             stat_ids.append(m)
-            except Exception as e:
+            except Exception:
                 pass
                 
         print(f"Found {len(stat_ids)} potential Excel files on E-stat. Checking structure...")
@@ -437,24 +431,34 @@ if b is None:
                 r_excel = requests.get(excel_url, headers=HEADERS, timeout=7)
                 if r_excel.status_code == 200 and is_excel(r_excel.content):
                     b_temp = BytesIO(r_excel.content)
-                    try:
-                        xl = pd.ExcelFile(b_temp)
-                        fallback = [s for s in xl.sheet_names if "季調済" in s and "月次" in s]
-                        if "季調済指数(Seasonaly adjusted)（月次M）" in xl.sheet_names or fallback:
-                            b = BytesIO(r_excel.content)
-                            print(f"Successfully located Retail Sales Excel on E-stat (statInfId={stat_id}).")
-                            break
-                    except Exception:
-                        pass
+                    
+                    # Verify this Excel file actually contains "小売業" (Retail Trade)
+                    xl = pd.ExcelFile(b_temp)
+                    found_retail = False
+                    for sheet in xl.sheet_names:
+                        df_peek = pd.read_excel(b_temp, sheet_name=sheet, header=None, nrows=40)
+                        for row_idx in range(len(df_peek)):
+                            if found_retail: break
+                            row_vals = df_peek.iloc[row_idx].astype(str).tolist()
+                            for val in row_vals:
+                                if "小売業" in val:
+                                    found_retail = True
+                                    break
+                        if found_retail: break
+                        
+                    if found_retail:
+                        b = BytesIO(r_excel.content)
+                        print(f"Successfully located Retail Sales Excel on E-stat (statInfId={stat_id}).")
+                        break
             except Exception:
                 pass
                 
         if b is None:
-            print("Could not find the Retail Sales Excel file in the scanned E-stat endpoints.")
+            print("Could not find the correct Retail Sales Excel file in the scanned E-stat endpoints.")
     except Exception as e:
         print(f"E-stat deep SPA scrape failed: {e}")
 
-# Strategy 3: curl_cffi with upgraded impersonation (chrome120)
+# Strategy 3: curl_cffi with upgraded impersonation
 if b is None:
     try:
         from curl_cffi import requests as cffi_requests
@@ -463,17 +467,13 @@ if b is None:
             excel, 
             impersonate="chrome120", 
             headers={"Referer": "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"},
-            timeout=30
+            timeout=20
         )
         if r.status_code == 200 and is_excel(r.content):
             b = BytesIO(r.content)
             print("Successfully downloaded Excel via curl_cffi.")
-        else:
-            print(f"curl_cffi returned status: {r.status_code}")
-    except ImportError:
-        print("curl_cffi is not installed. Skipping.")
-    except Exception as e:
-        print(f"curl_cffi failed: {e}")
+    except Exception:
+        pass
 
 # Strategy 4: Wayback Machine CDX API Fallback (Unfiltered)
 if b is None:
@@ -485,7 +485,7 @@ if b is None:
             f"&output=json"
             f"&fl=timestamp"
         )
-        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
         if r_cdx.status_code == 200:
             data = r_cdx.json()
             if len(data) > 1: 
@@ -496,64 +496,94 @@ if b is None:
                 if r_wb.status_code == 200 and is_excel(r_wb.content):
                     b = BytesIO(r_wb.content)
                     print("Successfully downloaded Excel via Wayback Machine.")
-                else:
-                    print(f"Wayback machine file fetch returned status {r_wb.status_code}")
-            else:
-                print("Wayback Machine CDX returned no valid snapshots.")
-    except Exception as e:
-        print(f"Wayback Machine failed: {e}")
+    except Exception:
+        pass
 
-# Catch-all exception if all fallback methods are completely unreachable
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
-def load_series(sheet_name):
+def load_series():
+    global b
     b.seek(0)
-    try:
-        x = pd.read_excel(b, sheet_name=sheet_name, header=None)
-    except ValueError:
-        b.seek(0)
-        xl = pd.ExcelFile(b)
-        fallback = [s for s in xl.sheet_names if "季調済" in s and "月次" in s]
-        if fallback:
-            print(f"Sheet '{sheet_name}' not found. Using fallback: '{fallback[0]}'")
-            x = pd.read_excel(b, sheet_name=fallback[0], header=None)
-        else:
-            print(f"Available sheets: {xl.sheet_names}")
-            raise
-
+    xl = pd.ExcelFile(b)
+    
+    target_sheet = None
+    # Prefer sheets with "季調" (Seasonally adjusted) or "季節"
+    for sheet in xl.sheet_names:
+        if "季調" in sheet or "季節" in sheet:
+            target_sheet = sheet
+            # If monthly is indicated, it's perfect
+            if "月" in sheet: break
+    
+    if not target_sheet:
+        target_sheet = xl.sheet_names[0]
+        
     retail_col = -1
-    start_row = 7
-    # Scan dynamically between rows 4 to 15 to locate the column named "小売業計" safely
-    for row_idx in range(4, min(15, len(x))):
-        row_vals = x.iloc[row_idx].astype(str).tolist()
-        if "小売業計" in row_vals:
-            retail_col = row_vals.index("小売業計")
-            start_row = row_idx + 1
-            break
+    start_row = 0
+    df = pd.read_excel(b, sheet_name=target_sheet, header=None)
+    
+    # Universal Search for "小売業" or "小売業計" (Retail Trade / Retail Total)
+    for row_idx in range(min(50, len(df))):
+        row_vals = df.iloc[row_idx].astype(str).tolist()
+        for col_idx, val in enumerate(row_vals):
+            if "小売業" in val:
+                retail_col = col_idx
+                start_row = row_idx + 1
+                break
+        if retail_col != -1: break
+        
+    if retail_col == -1:
+        # Fallback: scan all sheets if not found in target sheet
+        for sheet in xl.sheet_names:
+            if sheet == target_sheet: continue
+            df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
+            for row_idx in range(min(50, len(df_temp))):
+                row_vals = df_temp.iloc[row_idx].astype(str).tolist()
+                for col_idx, val in enumerate(row_vals):
+                    if "小売業" in val:
+                        retail_col = col_idx
+                        start_row = row_idx + 1
+                        df = df_temp
+                        break
+                if retail_col != -1: break
+            if retail_col != -1: break
             
     if retail_col == -1:
-        raise Exception("Could not dynamically locate '小売業計' column in the Retail Sales Excel sheet.")
-        
+        raise Exception(f"Could not dynamically locate '小売業' column. Sheets available: {xl.sheet_names}")
+
     rows = []
-    for i in range(start_row, len(x)):
-        text = " ".join(x.iloc[i].dropna().astype(str).tolist())
-        m = re.search(r"(20\d{2})\D{0,5}(1[0-2]|0?[1-9])", text)
+    for i in range(start_row, len(df)):
+        # Join first 5 cols to find robust date format
+        row_str = " ".join(df.iloc[i, 0:5].dropna().astype(str).tolist()).replace(" ", "")
+        
+        # Matches: "2025年1月", "2025/1", "2025.1", etc.
+        m = re.search(r"(19\d{2}|20\d{2})\D{0,2}([01]?[0-9])[月]?", row_str)
+        # Match fallback: "202501"
+        if not m and len(row_str) >= 6:
+            m = re.search(r"(19\d{2}|20\d{2})(1[0-2]|0[1-9])", row_str)
+            
         if not m:
             continue
-        date = pd.Timestamp(int(m.group(1)), int(m.group(2)), 1)
-        value = pd.to_numeric(x.iloc[i, retail_col], errors="coerce")
+            
+        year = int(m.group(1))
+        month = int(m.group(2))
+        if month < 1 or month > 12:
+            continue
+            
+        date = pd.Timestamp(year, month, 1)
+        val_str = str(df.iloc[i, retail_col]).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').strip()
+        value = pd.to_numeric(val_str, errors="coerce")
+        
         if pd.notna(value):
             rows.append([date, value])
             
-    return (
-        pd.DataFrame(rows, columns=["date", "retail"])
-        .drop_duplicates("date")
-        .sort_values("date")
-        .reset_index(drop=True)
-    )
+    res = pd.DataFrame(rows, columns=["date", "retail"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    if len(res) < 12:
+        raise Exception(f"Failed to extract sufficient time series data. Found {len(res)} rows.")
+        
+    return res
 
-monthly_retail = load_series("季調済指数(Seasonaly adjusted)（月次M）")
+monthly_retail = load_series()
 monthly_retail["change"] = monthly_retail["retail"].pct_change() * 100
 latest_monthly = monthly_retail.dropna(subset=["change"]).tail(3).reset_index(drop=True)
 
