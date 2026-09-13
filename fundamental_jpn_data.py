@@ -8,7 +8,6 @@ import warnings
 import time
 import urllib.request
 import urllib.parse
-import subprocess
 
 # Suppress warnings for cleaner execution output
 warnings.filterwarnings('ignore')
@@ -375,38 +374,88 @@ print("\nJapan Real GDP updated successfully")
 # =============================================================================
 # JAPAN RETAIL SALES (Universal Data Scraper + Dynamic Excel Parser)
 # =============================================================================
-excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
+# METI updated their endpoints; explicitly attempt .xlsx first and fall back to .xls
+excel_urls = [
+    "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xlsx",
+    "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
+]
 
 def is_excel(b_content):
+    # PK checks for .xlsx (ZIP structure), \xd0... checks for classic .xls
     return b_content.startswith(b'\xd0\xcf\x11\xe0') or b_content.startswith(b'PK')
 
 b = None
 print("Fetching Japan Retail Sales Excel...")
 
-# Strategy 1: Public CORS Proxies (Direct METI WAF Bypass)
-if b is None:
-    print("Attempting Public CORS Proxies for direct download...")
-    cors_proxies = [
-        f"https://api.allorigins.win/raw?url={urllib.parse.quote(excel)}",
-        f"https://corsproxy.io/?{urllib.parse.quote(excel)}"
-    ]
-    for proxy_url in cors_proxies:
-        if b is not None: break
+for excel in excel_urls:
+    if b is not None: break
+    print(f"\nTrying URL: {excel}")
+
+    # Strategy 1: Public CORS Proxies (Direct METI WAF Bypass)
+    if b is None:
+        print("Attempting Public CORS Proxies for direct download...")
+        cors_proxies = [
+            f"https://api.allorigins.win/raw?url={urllib.parse.quote(excel)}",
+            f"https://api.codetabs.com/v1/proxy?quest={urllib.parse.quote(excel)}",
+            f"https://corsproxy.io/?{urllib.parse.quote(excel)}"
+        ]
+        for proxy_url in cors_proxies:
+            if b is not None: break
+            try:
+                r_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                if r_proxy.status_code == 200 and is_excel(r_proxy.content):
+                    b = BytesIO(r_proxy.content)
+                    print(f"Successfully downloaded Excel via CORS proxy.")
+            except Exception:
+                pass
+
+    # Strategy 2: curl_cffi with upgraded impersonation
+    if b is None:
         try:
-            r_proxy = requests.get(proxy_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-            if r_proxy.status_code == 200 and is_excel(r_proxy.content):
-                b = BytesIO(r_proxy.content)
-                print(f"Successfully downloaded Excel via CORS proxy.")
+            from curl_cffi import requests as cffi_requests
+            print("Attempting curl_cffi (Chrome 120 impersonation)...")
+            r = cffi_requests.get(
+                excel, 
+                impersonate="chrome120", 
+                headers={"Referer": "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"},
+                timeout=20
+            )
+            if r.status_code == 200 and is_excel(r.content):
+                b = BytesIO(r.content)
+                print("Successfully downloaded Excel via curl_cffi.")
         except Exception:
             pass
 
-# Strategy 2: E-stat Aggressive SPA JSON Scrape & Dynamic Content Verification
+    # Strategy 3: Wayback Machine CDX API Fallback (Unfiltered)
+    if b is None:
+        try:
+            print("Attempting Wayback Machine...")
+            cdx_url = (
+                f"https://web.archive.org/cdx/search/cdx"
+                f"?url={urllib.parse.quote(excel)}"
+                f"&output=json"
+                f"&fl=timestamp"
+            )
+            r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            if r_cdx.status_code == 200:
+                data = r_cdx.json()
+                if len(data) > 1: 
+                    latest_timestamp = data[-1][0]
+                    wayback_url = f"https://web.archive.org/web/{latest_timestamp}id_/{excel}"
+                    print(f"Found CDX Snapshot: {wayback_url}")
+                    r_wb = requests.get(wayback_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+                    if r_wb.status_code == 200 and is_excel(r_wb.content):
+                        b = BytesIO(r_wb.content)
+                        print("Successfully downloaded Excel via Wayback Machine.")
+        except Exception:
+            pass
+
+# Strategy 4: E-stat Aggressive SPA JSON Scrape & Dynamic Content Verification
 if b is None:
     try:
         print("Attempting E-stat SPA JSON deep scrape for Japan Retail Sales...")
         search_urls = [
-            "https://www.e-stat.go.jp/stat-search/api/v1/layoutData?page=1&toukei=00550030&tstat=000001019842",
-            "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030&tstat=000001019842",
+            "https://www.e-stat.go.jp/stat-search/api/v1/layoutData?page=1&toukei=00550030",
             "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030"
         ]
         
@@ -416,7 +465,8 @@ if b is None:
                 r_s = requests.get(s_url, headers=HEADERS, timeout=10)
                 if r_s.status_code == 200:
                     matches = re.findall(r'statInfId["\']?\s*[:=]\s*["\']?([0-9]+)["\']?', r_s.text)
-                    matches += re.findall(r'"([0-9]{10,12})"', r_s.text)
+                    # Adding @id regex for parsing newer E-stat API schemas dynamically
+                    matches += re.findall(r'"@id"\s*:\s*"([0-9]{10,12})"', r_s.text)
                     for m in matches:
                         if m not in stat_ids:
                             stat_ids.append(m)
@@ -432,11 +482,11 @@ if b is None:
                 if r_excel.status_code == 200 and is_excel(r_excel.content):
                     b_temp = BytesIO(r_excel.content)
                     
-                    # Verify this Excel file actually contains "小売業" (Retail Trade)
                     xl = pd.ExcelFile(b_temp)
                     found_retail = False
                     for sheet in xl.sheet_names:
-                        df_peek = pd.read_excel(b_temp, sheet_name=sheet, header=None, nrows=40)
+                        # Increased row depth check from 40 to 150 rows
+                        df_peek = pd.read_excel(b_temp, sheet_name=sheet, header=None, nrows=150)
                         for row_idx in range(len(df_peek)):
                             if found_retail: break
                             row_vals = df_peek.iloc[row_idx].astype(str).tolist()
@@ -452,52 +502,8 @@ if b is None:
                         break
             except Exception:
                 pass
-                
-        if b is None:
-            print("Could not find the correct Retail Sales Excel file in the scanned E-stat endpoints.")
     except Exception as e:
         print(f"E-stat deep SPA scrape failed: {e}")
-
-# Strategy 3: curl_cffi with upgraded impersonation
-if b is None:
-    try:
-        from curl_cffi import requests as cffi_requests
-        print("Attempting curl_cffi (Chrome 120 impersonation)...")
-        r = cffi_requests.get(
-            excel, 
-            impersonate="chrome120", 
-            headers={"Referer": "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"},
-            timeout=20
-        )
-        if r.status_code == 200 and is_excel(r.content):
-            b = BytesIO(r.content)
-            print("Successfully downloaded Excel via curl_cffi.")
-    except Exception:
-        pass
-
-# Strategy 4: Wayback Machine CDX API Fallback (Unfiltered)
-if b is None:
-    try:
-        print("Attempting Wayback Machine...")
-        cdx_url = (
-            f"https://web.archive.org/cdx/search/cdx"
-            f"?url={urllib.parse.quote(excel)}"
-            f"&output=json"
-            f"&fl=timestamp"
-        )
-        r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
-        if r_cdx.status_code == 200:
-            data = r_cdx.json()
-            if len(data) > 1: 
-                latest_timestamp = data[-1][0]
-                wayback_url = f"https://web.archive.org/web/{latest_timestamp}id_/{excel}"
-                print(f"Found CDX Snapshot: {wayback_url}")
-                r_wb = requests.get(wayback_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
-                if r_wb.status_code == 200 and is_excel(r_wb.content):
-                    b = BytesIO(r_wb.content)
-                    print("Successfully downloaded Excel via Wayback Machine.")
-    except Exception:
-        pass
 
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
