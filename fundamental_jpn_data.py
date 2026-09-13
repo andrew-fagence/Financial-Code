@@ -373,7 +373,7 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (E-Stat Scraper + Robust WAF Bypass Implementation)
+# JAPAN RETAIL SALES (Robust E-Stat Sheet-Scanning Scraper + Fallbacks)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 referer = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
@@ -385,45 +385,56 @@ def is_excel(b_content):
 b = None
 print("Fetching Japan Retail Sales Excel...")
 
-# Strategy 1: E-Stat official mirror (Bypasses METI WAF completely and ensures latest data file dynamically)
+# Strategy 1: Aggressive E-Stat Sheet-Scanning (Fully bypasses WAF and handles arbitrary file naming)
 if b is None:
     try:
-        print("Attempting E-stat specific page scrape for Japan Retail Sales...")
+        print("Attempting E-stat aggressive scrape for Japan Retail Sales...")
+        # Search time-series data portals for the file IDs
         search_urls = [
             "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030&tstat=000001019842",
+            "https://www.e-stat.go.jp/stat-search/files?page=2&toukei=00550030&tstat=000001019842",
             "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030"
         ]
         
-        target_id = None
+        stat_ids = []
         for s_url in search_urls:
-            if target_id: break
-            r_s = requests.get(s_url, headers=HEADERS, timeout=30)
-            if r_s.status_code == 200:
-                # E-stat uses <article> or <li> blocks
-                articles = re.split(r'<article|<li', r_s.text)
-                for article in articles:
-                    # Target the file for Retail Sales Indices
-                    if "業種別商業販売額指数" in article and ("EXCEL" in article or "xls" in article.lower()):
-                        match = re.search(r'statInfId=([0-9]+)', article)
-                        if match:
-                            target_id = match.group(1)
+            try:
+                r_s = requests.get(s_url, headers=HEADERS, timeout=15)
+                if r_s.status_code == 200:
+                    matches = re.findall(r'statInfId=([0-9]+)', r_s.text)
+                    for m in matches:
+                        if m not in stat_ids:
+                            stat_ids.append(m)
+            except Exception as e:
+                print(f"Failed to fetch ID list from {s_url}: {e}")
+                
+        print(f"Found {len(stat_ids)} potential Excel files on E-stat. Checking structure...")
+        
+        # Test each file in sequence. This guarantees we get the exact dataset even if titles change.
+        for stat_id in stat_ids[:30]: 
+            try:
+                excel_url = f"https://www.e-stat.go.jp/stat-search/file-download?statInfId={stat_id}&fileKind=0"
+                r_excel = requests.get(excel_url, headers=HEADERS, timeout=10)
+                if r_excel.status_code == 200 and is_excel(r_excel.content):
+                    b_temp = BytesIO(r_excel.content)
+                    try:
+                        xl = pd.ExcelFile(b_temp)
+                        fallback = [s for s in xl.sheet_names if "季調済" in s and "月次" in s]
+                        if "季調済指数(Seasonaly adjusted)（月次M）" in xl.sheet_names or fallback:
+                            b = BytesIO(r_excel.content) # Instantiate clean stream
+                            print(f"Successfully located Retail Sales Excel on E-stat (statInfId={stat_id}).")
                             break
-                            
-        if target_id:
-            excel_url = f"https://www.e-stat.go.jp/stat-search/file-download?statInfId={target_id}&fileKind=0"
-            print(f"Found e-stat Excel URL: {excel_url}")
-            r_excel = requests.get(excel_url, headers=HEADERS, timeout=60)
-            if r_excel.status_code == 200 and is_excel(r_excel.content):
-                b = BytesIO(r_excel.content)
-                print("Successfully downloaded Excel via E-stat.")
-            else:
-                print(f"E-stat file returned non-Excel content. Status: {r_excel.status_code}")
-        else:
-            print("Could not find statInfId for 業種別商業販売額指数 on E-stat.")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+                
+        if b is None:
+            print("Could not find the Retail Sales Excel file in the scanned E-stat endpoints.")
     except Exception as e:
-        print(f"E-stat scrape failed: {e}")
+        print(f"E-stat sheet-scanning failed: {e}")
 
-# Strategy 2: curl_cffi (Native TLS fingerprint spoofing to bypass METI's WAF)
+# Strategy 2: curl_cffi (Native TLS fingerprint spoofing)
 if b is None:
     try:
         from curl_cffi import requests as cffi_requests
@@ -508,12 +519,12 @@ if b is None:
     except Exception as e:
         print(f"Wayback Machine failed: {e}")
 
-# Catch-all exception if IP is fully locked down and CDX is completely unreachable.
+# Catch-all exception if IP is fully locked down and fallbacks are completely unreachable.
 if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
 def load_series(sheet_name):
-    # Added defensive programming to locate the right sheet in case METI modified it slightly
+    # Added defensive programming to locate the right sheet in case formatting modifies slightly
     b.seek(0)
     try:
         x = pd.read_excel(b, sheet_name=sheet_name, header=None)
@@ -530,7 +541,7 @@ def load_series(sheet_name):
 
     retail_col = -1
     start_row = 7
-    # Scan dynamically between rows 4 to 15 to locate the column named "小売業計" safely
+    # Scan dynamically between rows 4 to 15 to locate the target column named "小売業計" safely
     for row_idx in range(4, min(15, len(x))):
         row_vals = x.iloc[row_idx].astype(str).tolist()
         if "小売業計" in row_vals:
