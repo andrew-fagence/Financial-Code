@@ -373,7 +373,7 @@ print("\nJapan Real GDP updated successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (curl_cffi / Wayback Machine WAF Bypass Implementation)
+# JAPAN RETAIL SALES (E-Stat Scraper + Robust WAF Bypass Implementation)
 # =============================================================================
 excel = "https://www.meti.go.jp/statistics/tyo/syoudou/result/excel/h2a1ij.xls"
 referer = "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html"
@@ -385,7 +385,45 @@ def is_excel(b_content):
 b = None
 print("Fetching Japan Retail Sales Excel...")
 
-# Strategy 1: curl_cffi (Native TLS fingerprint spoofing to bypass METI's WAF)
+# Strategy 1: E-Stat official mirror (Bypasses METI WAF completely and ensures latest data file dynamically)
+if b is None:
+    try:
+        print("Attempting E-stat specific page scrape for Japan Retail Sales...")
+        search_urls = [
+            "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030&tstat=000001019842",
+            "https://www.e-stat.go.jp/stat-search/files?page=1&toukei=00550030"
+        ]
+        
+        target_id = None
+        for s_url in search_urls:
+            if target_id: break
+            r_s = requests.get(s_url, headers=HEADERS, timeout=30)
+            if r_s.status_code == 200:
+                # E-stat uses <article> or <li> blocks
+                articles = re.split(r'<article|<li', r_s.text)
+                for article in articles:
+                    # Target the file for Retail Sales Indices
+                    if "業種別商業販売額指数" in article and ("EXCEL" in article or "xls" in article.lower()):
+                        match = re.search(r'statInfId=([0-9]+)', article)
+                        if match:
+                            target_id = match.group(1)
+                            break
+                            
+        if target_id:
+            excel_url = f"https://www.e-stat.go.jp/stat-search/file-download?statInfId={target_id}&fileKind=0"
+            print(f"Found e-stat Excel URL: {excel_url}")
+            r_excel = requests.get(excel_url, headers=HEADERS, timeout=60)
+            if r_excel.status_code == 200 and is_excel(r_excel.content):
+                b = BytesIO(r_excel.content)
+                print("Successfully downloaded Excel via E-stat.")
+            else:
+                print(f"E-stat file returned non-Excel content. Status: {r_excel.status_code}")
+        else:
+            print("Could not find statInfId for 業種別商業販売額指数 on E-stat.")
+    except Exception as e:
+        print(f"E-stat scrape failed: {e}")
+
+# Strategy 2: curl_cffi (Native TLS fingerprint spoofing to bypass METI's WAF)
 if b is None:
     try:
         from curl_cffi import requests as cffi_requests
@@ -402,11 +440,11 @@ if b is None:
         else:
             print(f"curl_cffi returned non-Excel content. Status: {r.status_code}")
     except ImportError:
-        print("curl_cffi is not installed. Skipping Strategy 1.")
+        print("curl_cffi is not installed. Skipping Strategy 2.")
     except Exception as e:
         print(f"curl_cffi failed: {e}")
 
-# Strategy 2: Standard Requests with session cookies
+# Strategy 3: Standard Requests with session cookies
 if b is None:
     try:
         print("Attempting requests Session...")
@@ -423,7 +461,7 @@ if b is None:
     except Exception as e:
         print(f"requests Session failed: {e}")
 
-# Strategy 3: urllib
+# Strategy 4: urllib
 if b is None:
     try:
         print("Attempting urllib...")
@@ -438,11 +476,10 @@ if b is None:
     except Exception as e:
         print(f"urllib failed: {e}")
 
-# Strategy 4: Wayback Machine CDX API Fallback (Guaranteed to bypass WAF)
+# Strategy 5: Wayback Machine CDX API Fallback
 if b is None:
     try:
         print("Attempting Wayback Machine...")
-        # Using limit=-1 ensures we only pull the absolute latest snapshot, preventing the 20-second search timeout
         cdx_url = (
             f"https://web.archive.org/cdx/search/cdx"
             f"?url={urllib.parse.quote(excel)}"
@@ -451,12 +488,10 @@ if b is None:
             f"&filter=statuscode:200"
             f"&limit=-1" 
         )
-        # Timeout strictly extended to 60s to account for Archive backend load
         r_cdx = requests.get(cdx_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
         if r_cdx.status_code == 200:
             data = r_cdx.json()
             if len(data) > 1: 
-                # data[-1][0] gets the timestamp of the latest snapshot entry returned
                 latest_timestamp = data[-1][0]
                 wayback_url = f"https://web.archive.org/web/{latest_timestamp}id_/{excel}"
                 print(f"Found CDX Snapshot: {wayback_url}")
@@ -478,10 +513,36 @@ if b is None:
     raise Exception("All download attempts for Japan Retail Sales completely failed.")
 
 def load_series(sheet_name):
-    x = pd.read_excel(b, sheet_name=sheet_name, header=None)
-    retail_col = x.iloc[6].astype(str).tolist().index("小売業計")
+    # Added defensive programming to locate the right sheet in case METI modified it slightly
+    b.seek(0)
+    try:
+        x = pd.read_excel(b, sheet_name=sheet_name, header=None)
+    except ValueError:
+        b.seek(0)
+        xl = pd.ExcelFile(b)
+        fallback = [s for s in xl.sheet_names if "季調済" in s and "月次" in s]
+        if fallback:
+            print(f"Sheet '{sheet_name}' not found. Using fallback: '{fallback[0]}'")
+            x = pd.read_excel(b, sheet_name=fallback[0], header=None)
+        else:
+            print(f"Available sheets: {xl.sheet_names}")
+            raise
+
+    retail_col = -1
+    start_row = 7
+    # Scan dynamically between rows 4 to 15 to locate the column named "小売業計" safely
+    for row_idx in range(4, min(15, len(x))):
+        row_vals = x.iloc[row_idx].astype(str).tolist()
+        if "小売業計" in row_vals:
+            retail_col = row_vals.index("小売業計")
+            start_row = row_idx + 1
+            break
+            
+    if retail_col == -1:
+        raise Exception("Could not dynamically locate '小売業計' column in the Retail Sales Excel sheet.")
+        
     rows = []
-    for i in range(7, len(x)):
+    for i in range(start_row, len(x)):
         text = " ".join(x.iloc[i].dropna().astype(str).tolist())
         m = re.search(r"(20\d{2})\D{0,5}(1[0-2]|0?[1-9])", text)
         if not m:
@@ -490,6 +551,7 @@ def load_series(sheet_name):
         value = pd.to_numeric(x.iloc[i, retail_col], errors="coerce")
         if pd.notna(value):
             rows.append([date, value])
+            
     return (
         pd.DataFrame(rows, columns=["date", "retail"])
         .drop_duplicates("date")
