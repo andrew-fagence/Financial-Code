@@ -1,0 +1,40 @@
+name: UK Fundamental Data Updater
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  
+  # Runs automatically at 08:00 UTC every day
+  # (You can adjust this cron timing to fit your specific schedule needs)
+  schedule:
+    - cron: '0 8 * * *'
+
+jobs:
+  update-uk-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up the Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 3. Install the required libraries from your requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Reconstruct the GCP JSON credentials file from the GitHub Secret
+      - name: Create GCP Credentials JSON file
+        run: |
+          echo '${{ secrets.GCP_CREDENTIALS }}' > forexdailybias-5ce3a8ede6c9.json
+
+      # 5. Execute the Python script
+      - name: Run UK fundamental data script
+        run: python fundamental_uk_data.py
