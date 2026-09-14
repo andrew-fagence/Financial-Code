@@ -3,8 +3,10 @@ import pandas as pd
 import gspread
 import re
 import fredapi as fa
+import time
 from google.oauth2.service_account import Credentials
 from io import BytesIO, StringIO
+from gspread.exceptions import APIError
 
 # ==============================================================================
 # 1. SETUP & AUTHENTICATION
@@ -15,7 +17,7 @@ scopes = [
     "https://www.googleapis.com/auth/spreadsheets"
 ]
 
-# Get credentials from JSON file (ensure this file is available in your deployment environment)
+# Get credentials from JSON file
 creds = Credentials.from_service_account_file("forexdailybias-5ce3a8ede6c9.json", scopes=scopes)
 client = gspread.authorize(creds)
 
@@ -29,6 +31,48 @@ print("Connected to 'Historical Values Storage' sheet successfully.")
 
 # FRED API Setup
 fred = fa.Fred('2d406210f6235b1e9f9e750365bcc8b4')
+
+
+# ==============================================================================
+# WAIT & RETRY HELPER FUNCTIONS
+# ==============================================================================
+
+def safe_update_cell(worksheet, row, col, value):
+    """Updates a cell with a built-in delay and exponential backoff retry on 429 quota errors."""
+    retries = 0
+    while retries < 5:
+        try:
+            worksheet.update_cell(row, col, value)
+            time.sleep(1.2)  # Base delay to prevent hitting the 60 requests/min quota
+            return
+        except APIError as e:
+            if '429' in str(e):
+                wait_time = 15 * (retries + 1)
+                print(f"API rate limit (429) hit. Waiting {wait_time}s before retrying...")
+                time.sleep(wait_time)
+                retries += 1
+            else:
+                raise e
+    raise Exception(f"Failed to update cell after 5 retries. row={row}, col={col}")
+
+
+def safe_update(worksheet, range_name, values):
+    """Updates a cell range with a built-in delay and exponential backoff retry on 429 quota errors."""
+    retries = 0
+    while retries < 5:
+        try:
+            worksheet.update(range_name=range_name, values=values)
+            time.sleep(1.2)  # Base delay to prevent hitting the 60 requests/min quota
+            return
+        except APIError as e:
+            if '429' in str(e):
+                wait_time = 15 * (retries + 1)
+                print(f"API rate limit (429) hit. Waiting {wait_time}s before retrying...")
+                time.sleep(wait_time)
+                retries += 1
+            else:
+                raise e
+    raise Exception(f"Failed to update range after 5 retries. range={range_name}")
 
 
 # ==============================================================================
@@ -54,8 +98,8 @@ df_core = df_core.sort_values("date").reset_index(drop=True)
 latest_3_core = df_core.tail(3).reset_index(drop=True)
 row_m, col_m = 4, 2   # Row 4, Column B
 for i, r_val in latest_3_core.iterrows():
-    wb.update_cell(row_m, col_m + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_m, col_m + (i * 2) + 1, round(r_val["core_cpi_mom"], 2))
+    safe_update_cell(wb, row_m, col_m + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_m, col_m + (i * 2) + 1, round(r_val["core_cpi_mom"], 2))
 print("Last 3 months Core CPI MoM updated successfully")
 
 # Quarterly Core CPI
@@ -69,8 +113,8 @@ quarterly_core.columns = ["date", "core_cpi_quarterly"]
 latest_3_quarters_core = quarterly_core.tail(3).reset_index(drop=True)
 row_q, col_q = 9, 2   # Row 9, Column B
 for i, r_val in latest_3_quarters_core.iterrows():
-    wb.update_cell(row_q, col_q + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_q, col_q + (i * 2) + 1, round(r_val["core_cpi_quarterly"], 4))
+    safe_update_cell(wb, row_q, col_q + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_q, col_q + (i * 2) + 1, round(r_val["core_cpi_quarterly"], 4))
 print("Quarterly Core CPI changes updated successfully")
 
 # Yearly Core CPI
@@ -88,8 +132,8 @@ df_core_yoy = df_core_yoy.sort_values("date").reset_index(drop=True)
 latest_3_core_yoy = df_core_yoy.tail(3).reset_index(drop=True)
 row_y, col_y = 14, 2   # Row 14, Column B
 for i, r_val in latest_3_core_yoy.iterrows():
-    wb.update_cell(row_y, col_y + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_y, col_y + (i * 2) + 1, round(r_val["core_cpi_yoy"], 2))
+    safe_update_cell(wb, row_y, col_y + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_y, col_y + (i * 2) + 1, round(r_val["core_cpi_yoy"], 2))
 print("Last 3 Core CPI YoY observations updated successfully")
 
 
@@ -115,8 +159,8 @@ df_cpi["cpi_mom"] = (df_cpi["cpi_index"] / df_cpi["cpi_index"].shift(1) - 1) * 1
 latest_3_cpi = df_cpi.dropna().tail(3).reset_index(drop=True)
 row_m, col_m = 4, 8   # Row 4, Column H
 for i, r_val in latest_3_cpi.iterrows():
-    wb.update_cell(row_m, col_m + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_m, col_m + (i * 2) + 1, round(r_val["cpi_mom"], 2))
+    safe_update_cell(wb, row_m, col_m + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_m, col_m + (i * 2) + 1, round(r_val["cpi_mom"], 2))
 print("UK Headline CPI monthly updated successfully")
 
 # Quarterly Headline CPI
@@ -131,8 +175,8 @@ quarterly_cpi.columns = ["date", "cpi_quarterly"]
 latest_3_quarters_cpi = quarterly_cpi.tail(3).reset_index(drop=True)
 row_q, col_q = 9, 8   # Row 9, Column H
 for i, r_val in latest_3_quarters_cpi.iterrows():
-    wb.update_cell(row_q, col_q + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_q, col_q + (i * 2) + 1, round(r_val["cpi_quarterly"], 4))
+    safe_update_cell(wb, row_q, col_q + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_q, col_q + (i * 2) + 1, round(r_val["cpi_quarterly"], 4))
 print("UK Headline CPI quarterly updated successfully")
 
 # Yearly Headline CPI
@@ -150,8 +194,8 @@ df_cpi_yearly = df_cpi_yearly.sort_values("date").reset_index(drop=True)
 latest_3_cpi_yearly = df_cpi_yearly.tail(3).reset_index(drop=True)
 row_y, col_y = 14, 8   # Row 14, Column H
 for i, r_val in latest_3_cpi_yearly.iterrows():
-    wb.update_cell(row_y, col_y + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_y, col_y + (i * 2) + 1, round(r_val["cpi_yoy"], 2))
+    safe_update_cell(wb, row_y, col_y + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_y, col_y + (i * 2) + 1, round(r_val["cpi_yoy"], 2))
 print("UK Headline CPI yearly updated successfully")
 
 
@@ -177,8 +221,8 @@ df_ppi["ppi_mom"] = (df_ppi["ppi_index"] / df_ppi["ppi_index"].shift(1) - 1) * 1
 latest_3_ppi = df_ppi.dropna().tail(3).reset_index(drop=True)
 row_m, col_m = 4, 14   # Row 4, Column N
 for i, r_val in latest_3_ppi.iterrows():
-    wb.update_cell(row_m, col_m + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_m, col_m + (i * 2) + 1, round(r_val["ppi_mom"], 2))
+    safe_update_cell(wb, row_m, col_m + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_m, col_m + (i * 2) + 1, round(r_val["ppi_mom"], 2))
 print("UK Headline PPI monthly updated successfully")
 
 # Quarterly PPI
@@ -193,8 +237,8 @@ quarterly_ppi.columns = ["date", "ppi_quarterly"]
 latest_3_quarters_ppi = quarterly_ppi.tail(3).reset_index(drop=True)
 row_q, col_q = 9, 14   # Row 9, Column N
 for i, r_val in latest_3_quarters_ppi.iterrows():
-    wb.update_cell(row_q, col_q + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_q, col_q + (i * 2) + 1, round(r_val["ppi_quarterly"], 4))
+    safe_update_cell(wb, row_q, col_q + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_q, col_q + (i * 2) + 1, round(r_val["ppi_quarterly"], 4))
 print("UK Headline PPI quarterly updated successfully")
 
 # Yearly PPI
@@ -202,8 +246,8 @@ df_ppi["ppi_yoy"] = (df_ppi["ppi_index"] / df_ppi["ppi_index"].shift(12) - 1) * 
 latest_3_ppi_yearly = df_ppi.dropna(subset=["ppi_yoy"]).tail(3).reset_index(drop=True)
 row_y, col_y = 14, 14   # Row 14, Column N
 for i, r_val in latest_3_ppi_yearly.iterrows():
-    wb.update_cell(row_y, col_y + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(row_y, col_y + (i * 2) + 1, round(r_val["ppi_yoy"], 2))
+    safe_update_cell(wb, row_y, col_y + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, row_y, col_y + (i * 2) + 1, round(r_val["ppi_yoy"], 2))
 print("UK Headline PPI yearly updated successfully")
 
 
@@ -237,8 +281,8 @@ yearly_gdp = get_ons_gdp_series("IHYR")
 def write_last_three_gdp(df, row, col):
     latest = df.tail(3).reset_index(drop=True)
     for i, r_val in latest.iterrows():
-        wb.update_cell(row, col + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-        wb.update_cell(row, col + (i * 2) + 1, round(r_val["value"], 2))
+        safe_update_cell(wb, row, col + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+        safe_update_cell(wb, row, col + (i * 2) + 1, round(r_val["value"], 2))
 
 write_last_three_gdp(quarterly_gdp, 27, 2)
 write_last_three_gdp(yearly_gdp, 32, 2)
@@ -275,8 +319,8 @@ quarterly_retail.columns = ["date", "retail_quarterly"]
 def write_last_three_cols(df, value_column, row, col):
     latest = df.dropna(subset=[value_column]).tail(3).reset_index(drop=True)
     for i, r_val in latest.iterrows():
-        wb.update_cell(row, col + i * 2, r_val["date"].strftime("%Y-%m-%d"))
-        wb.update_cell(row, col + i * 2 + 1, round(r_val[value_column], 2))
+        safe_update_cell(wb, row, col + i * 2, r_val["date"].strftime("%Y-%m-%d"))
+        safe_update_cell(wb, row, col + i * 2 + 1, round(r_val[value_column], 2))
 
 write_last_three_cols(retail, "retail_monthly", 22, 8)
 write_last_three_cols(quarterly_retail, "retail_quarterly", 27, 8)
@@ -321,16 +365,16 @@ yearly_ind = df_ind.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=Tr
 
 # Write to Sheets (Column Z = 26)
 for i, r_val in monthly_ind.iterrows():
-    wb.update_cell(22, 26 + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(22, 26 + (i * 2) + 1, round(r_val["monthly_change"], 2))
+    safe_update_cell(wb, 22, 26 + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 22, 26 + (i * 2) + 1, round(r_val["monthly_change"], 2))
 
 for i, r_val in quarterly_ind.iterrows():
-    wb.update_cell(27, 26 + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(27, 26 + (i * 2) + 1, round(r_val["quarterly_change"], 2))
+    safe_update_cell(wb, 27, 26 + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 27, 26 + (i * 2) + 1, round(r_val["quarterly_change"], 2))
 
 for i, r_val in yearly_ind.iterrows():
-    wb.update_cell(32, 26 + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(32, 26 + (i * 2) + 1, round(r_val["yearly_change"], 2))
+    safe_update_cell(wb, 32, 26 + (i * 2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 32, 26 + (i * 2) + 1, round(r_val["yearly_change"], 2))
 print("UK Industrial Sales updated successfully")
 
 
@@ -366,16 +410,16 @@ yearly_prod = df_prod.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=
 
 # Write to Sheets (Column AF = 32)
 for i, r_val in monthly_prod.iterrows():
-    wb.update_cell(22, 32 + (i*2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(22, 32 + (i*2)+1, round(r_val["monthly_change"], 2))
+    safe_update_cell(wb, 22, 32 + (i*2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 22, 32 + (i*2)+1, round(r_val["monthly_change"], 2))
 
 for i, r_val in quarterly_prod.iterrows():
-    wb.update_cell(27, 32 + (i*2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(27, 32 + (i*2)+1, round(r_val["quarterly_change"], 2))
+    safe_update_cell(wb, 27, 32 + (i*2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 27, 32 + (i*2)+1, round(r_val["quarterly_change"], 2))
 
 for i, r_val in yearly_prod.iterrows():
-    wb.update_cell(32, 32 + (i*2), r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(32, 32 + (i*2)+1, round(r_val["yearly_change"], 2))
+    safe_update_cell(wb, 32, 32 + (i*2), r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 32, 32 + (i*2)+1, round(r_val["yearly_change"], 2))
 print("UK Industrial Production updated successfully")
 
 
@@ -411,16 +455,16 @@ df_payroll["yearly_change"] = df_payroll["payrolled_employees"].pct_change(12) *
 yearly_payroll = df_payroll[["date", "payrolled_employees", "monthly_change", "yearly_change"]].dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
 
 for i, r_val in monthly_payroll.iterrows():
-    wb.update_cell(116, 2 + i * 2, r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(116, 3 + i * 2, round(r_val["monthly_change"], 2))
+    safe_update_cell(wb, 116, 2 + i * 2, r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 116, 3 + i * 2, round(r_val["monthly_change"], 2))
 
 for i, r_val in quarterly_payroll.iterrows():
-    wb.update_cell(121, 2 + i * 2, r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(121, 3 + i * 2, round(r_val["quarterly_change"], 2))
+    safe_update_cell(wb, 121, 2 + i * 2, r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 121, 3 + i * 2, round(r_val["quarterly_change"], 2))
 
 for i, r_val in yearly_payroll.iterrows():
-    wb.update_cell(126, 2 + i * 2, r_val["date"].strftime("%Y-%m-%d"))
-    wb.update_cell(126, 3 + i * 2, round(r_val["yearly_change"], 2))
+    safe_update_cell(wb, 126, 2 + i * 2, r_val["date"].strftime("%Y-%m-%d"))
+    safe_update_cell(wb, 126, 3 + i * 2, round(r_val["yearly_change"], 2))
 print("UK Payrolled Employees updated successfully.")
 
 
@@ -459,7 +503,7 @@ def write_row_unemp(df, row):
     values = []
     for _, r_val in df.iterrows():
         values.extend([r_val["date"].strftime("%Y-%m-%d"), round(float(r_val["value"]), 2)])
-    wb.update(range_name=f"H{row}:M{row}", values=[values])
+    safe_update(wb, range_name=f"H{row}:M{row}", values=[values])
 
 write_row_unemp(monthly_unemp, 116)
 write_row_unemp(quarterly_unemp, 121)
@@ -510,7 +554,7 @@ def write_to_sheet_lf(df, row, value_col):
             result = chr(65 + rem) + result
         return result
     cell_range = f"{col_letter(start_col)}{row}:{col_letter(end_col)}{row}"
-    wb.update(range_name=cell_range, values=[values])
+    safe_update(wb, range_name=cell_range, values=[values])
 
 write_to_sheet_lf(monthly_lf, 116, "monthly_change")
 write_to_sheet_lf(quarterly_lf, 121, "quarterly_change")
@@ -567,7 +611,7 @@ else:
                 s = chr(65 + rem) + s
             return s
         cell_range = f"{col_letter(start_col)}{row}:{col_letter(end_col)}{row}"
-        wb.update(range_name=cell_range, values=[values])
+        safe_update(wb, range_name=cell_range, values=[values])
 
     write_row_earn(monthly_earn, 116, "monthly_change")
     write_row_earn(quarterly_earn, 121, "quarterly_change")
@@ -606,7 +650,7 @@ def write_row_claim(df, row):
     values = []
     for _, r_val in df.iterrows():
         values.extend([r_val["date"].strftime("%Y-%m-%d"), round(float(r_val["change"]), 2)])
-    wb.update(range_name=f"Z{row}:AE{row}", values=[values])
+    safe_update(wb, range_name=f"Z{row}:AE{row}", values=[values])
 
 write_row_claim(monthly_claim, 116)
 write_row_claim(quarterly_claim, 121)
@@ -638,7 +682,7 @@ def write_row_vac(df, row):
     values = []
     for _, r_val in df.iterrows():
         values.extend([r_val["date"].strftime("%Y-%m-%d"), round(float(r_val["change"]), 2)])
-    wb.update(range_name=f"AF{row}:AK{row}", values=[values])
+    safe_update(wb, range_name=f"AF{row}:AK{row}", values=[values])
 
 write_row_vac(monthly_vac, 116)
 write_row_vac(quarterly_vac, 121)
