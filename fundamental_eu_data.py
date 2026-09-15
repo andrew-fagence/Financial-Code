@@ -30,6 +30,21 @@ print("Row headings:", values_list)
 # Setup FRED API
 fred = fa.Fred('2d406210f6235b1e9f9e750365bcc8b4')
 
+# Retry wrapper to prevent 429 Rate Limit Errors
+def update_cell_with_retry(row, col, value, max_retries=6):
+    for attempt in range(max_retries):
+        try:
+            wb.update_cell(row, col, value)
+            return
+        except gspread.exceptions.APIError as e:
+            if "429" in str(e):
+                wait_time = (2 ** attempt) * 5
+                print(f"Rate limit 429 hit. Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+            else:
+                raise
+    raise Exception(f"Failed to update cell after {max_retries} attempts.")
+
 
 # ==============================================================================
 # 2. CORE HICP (EU)
@@ -71,9 +86,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "monthly_change"], 4)
     
-    wb.update_cell(3, 2 + (i * 2), date)
+    update_cell_with_retry(3, 2 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(3, 3 + (i * 2), value)
+    update_cell_with_retry(3, 3 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → EU Core HICP MoM: {value}%")
 
@@ -90,9 +105,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "quarterly_change"], 4)
     
-    wb.update_cell(8, 2 + (i * 2), date)
+    update_cell_with_retry(8, 2 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(8, 3 + (i * 2), value)
+    update_cell_with_retry(8, 3 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → EU Core HICP Quarterly Change: {value}%")
 
@@ -125,9 +140,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "core_hicp"], 4)
     
-    wb.update_cell(13, 2 + (i * 2), date)
+    update_cell_with_retry(13, 2 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(13, 3 + (i * 2), value)
+    update_cell_with_retry(13, 3 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → EU Core HICP YoY: {value}%")
 
@@ -170,9 +185,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "monthly_change"], 4)
     
-    wb.update_cell(3, 8 + (i * 2), date)
+    update_cell_with_retry(3, 8 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(3, 9 + (i * 2), value)
+    update_cell_with_retry(3, 9 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → EU Headline HICP MoM: {value}%")
 
@@ -189,9 +204,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "quarterly_change"], 4)
     
-    wb.update_cell(8, 8 + (i * 2), date)
+    update_cell_with_retry(8, 8 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(8, 9 + (i * 2), value)
+    update_cell_with_retry(8, 9 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → EU Headline HICP Quarterly Change: {value}%")
 
@@ -224,9 +239,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "headline_hicp_yoy"], 4)
     
-    wb.update_cell(13, 8 + (i * 2), date)
+    update_cell_with_retry(13, 8 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(13, 9 + (i * 2), value)
+    update_cell_with_retry(13, 9 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → EU Headline HICP YoY: {value}%")
 
@@ -280,23 +295,23 @@ print(quarterly.tail(6))
 # Write to Sheets
 latest = ppi_monthly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(3, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(3, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(3, 15 + i*2, round(row["value"], 4))
+    update_cell_with_retry(3, 15 + i*2, round(row["value"], 4))
     time.sleep(1)
 
 latest = quarterly.dropna().tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(8, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(8, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(8, 15 + i*2, round(row["quarterly_change"], 4))
+    update_cell_with_retry(8, 15 + i*2, round(row["quarterly_change"], 4))
     time.sleep(1)
 
 latest = ppi_yoy.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(13, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(13, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(13, 15 + i*2, round(row["value"], 4))
+    update_cell_with_retry(13, 15 + i*2, round(row["value"], 4))
     time.sleep(1)
 
 print("Google Sheet updated successfully")
@@ -349,23 +364,23 @@ print(quarterly.tail(6))
 # Write to Sheets
 latest = ppi_monthly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(3, 20 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(3, 20 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(3, 21 + i*2, round(row["value"], 4))
+    update_cell_with_retry(3, 21 + i*2, round(row["value"], 4))
     time.sleep(1)
 
 latest = quarterly.dropna().tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(8, 20 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(8, 20 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(8, 21 + i*2, round(row["quarterly_change"], 4))
+    update_cell_with_retry(8, 21 + i*2, round(row["quarterly_change"], 4))
     time.sleep(1)
 
 latest = ppi_yoy.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(13, 20 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(13, 20 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(13, 21 + i*2, round(row["value"], 4))
+    update_cell_with_retry(13, 21 + i*2, round(row["value"], 4))
     time.sleep(1)
 
 print("Google Sheet updated successfully")
@@ -415,9 +430,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "qoq"], 4)
     
-    wb.update_cell(26, 2 + (i * 2), date)
+    update_cell_with_retry(26, 2 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(26, 3 + (i * 2), value)
+    update_cell_with_retry(26, 3 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → Euro Area GDP q/q: {value}%")
 
@@ -432,9 +447,9 @@ for i in range(len(latest)):
     date = latest.loc[i, "date"].strftime("%Y-%m-%d")
     value = round(latest.loc[i, "yoy"], 4)
     
-    wb.update_cell(31, 2 + (i * 2), date)
+    update_cell_with_retry(31, 2 + (i * 2), date)
     time.sleep(1)
-    wb.update_cell(31, 3 + (i * 2), value)
+    update_cell_with_retry(31, 3 + (i * 2), value)
     time.sleep(1)
     print(f"{date} → Euro Area GDP y/y: {value}%")
 
@@ -490,23 +505,23 @@ print(quarterly.tail(6))
 # Write to Sheets
 latest = monthly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(21, 8+i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(21, 8+i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(21, 9+i*2, round(row["value"], 4))
+    update_cell_with_retry(21, 9+i*2, round(row["value"], 4))
     time.sleep(1)
 
 latest = quarterly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(26, 8+i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(26, 8+i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(26, 9+i*2, round(row["qoq"], 4))
+    update_cell_with_retry(26, 9+i*2, round(row["qoq"], 4))
     time.sleep(1)
 
 latest = yearly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(31, 8+i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(31, 8+i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(31, 9+i*2, round(row["value"], 4))
+    update_cell_with_retry(31, 9+i*2, round(row["value"], 4))
     time.sleep(1)
 
 print("Google Sheet updated successfully")
@@ -548,9 +563,9 @@ print("\nEURO AREA SERVICES MONTHLY CHANGE")
 print(latest)
 
 for i, row in latest.iterrows():
-    wb.update_cell(21, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(21, 14 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(21, 15 + i*2, round(row["mom"], 4))
+    update_cell_with_retry(21, 15 + i*2, round(row["mom"], 4))
     time.sleep(1)
     print(f"{row['date'].strftime('%Y-%m-%d')} → Services m/m: {round(row['mom'],4)}%")
 
@@ -595,9 +610,9 @@ print(industrial.tail(6))
 
 latest = industrial.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(21, 20 + i * 2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(21, 20 + i * 2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(21, 21 + i * 2, round(row["mom"], 4))
+    update_cell_with_retry(21, 21 + i * 2, round(row["mom"], 4))
     time.sleep(1)
     print(f"{row['date'].strftime('%Y-%m-%d')} → Industrial Production m/m: {row['mom']:.4f}%")
 
@@ -656,23 +671,23 @@ print(yearly.tail(6))
 
 # Monthly
 for i, row in monthly.tail(3).reset_index(drop=True).iterrows():
-    wb.update_cell(21, 26 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(21, 26 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(21, 27 + i*2, round(row["mom"], 4))
+    update_cell_with_retry(21, 27 + i*2, round(row["mom"], 4))
     time.sleep(1)
 
 # Quarterly
 for i, row in quarterly.tail(3).reset_index(drop=True).iterrows():
-    wb.update_cell(26, 26 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(26, 26 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(26, 27 + i*2, round(row["qoq"], 4))
+    update_cell_with_retry(26, 27 + i*2, round(row["qoq"], 4))
     time.sleep(1)
 
 # Yearly
 for i, row in yearly.tail(3).reset_index(drop=True).iterrows():
-    wb.update_cell(31, 26 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(31, 26 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(31, 27 + i*2, round(row["yoy"], 4))
+    update_cell_with_retry(31, 27 + i*2, round(row["yoy"], 4))
     time.sleep(1)
 
 
@@ -695,25 +710,25 @@ yearly = yearly.rename(columns={"factor": "yoy"})
 # Monthly row 21
 latest = monthly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(21, 32 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(21, 32 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(21, 33 + i*2, round(row["mom"], 4))
+    update_cell_with_retry(21, 33 + i*2, round(row["mom"], 4))
     time.sleep(1)
 
 # Quarterly row 26
 latest = quarterly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(26, 32 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(26, 32 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(26, 33 + i*2, round(row["qoq"], 4))
+    update_cell_with_retry(26, 33 + i*2, round(row["qoq"], 4))
     time.sleep(1)
 
 # Yearly row 31
 latest = yearly.dropna().tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(31, 32 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(31, 32 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(31, 33 + i*2, round(row["yoy"], 4))
+    update_cell_with_retry(31, 33 + i*2, round(row["yoy"], 4))
     time.sleep(1)
 
 print("Google Sheet updated successfully")
@@ -769,17 +784,17 @@ print(yearly.tail(6))
 # Write to Sheets
 latest = quarterly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(120, 2 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(120, 2 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(120, 3 + i*2, round(row["qoq"], 4))
+    update_cell_with_retry(120, 3 + i*2, round(row["qoq"], 4))
     time.sleep(1)
     print(f"{row['date'].strftime('%Y-%m-%d')} → Employment q/q: {round(row['qoq'],4)}%")
 
 latest = yearly.tail(3).reset_index(drop=True)
 for i, row in latest.iterrows():
-    wb.update_cell(125, 2 + i*2, row["date"].strftime("%Y-%m-%d"))
+    update_cell_with_retry(125, 2 + i*2, row["date"].strftime("%Y-%m-%d"))
     time.sleep(1)
-    wb.update_cell(125, 3 + i*2, round(row["yoy"], 4))
+    update_cell_with_retry(125, 3 + i*2, round(row["yoy"], 4))
     time.sleep(1)
     print(f"{row['date'].strftime('%Y-%m-%d')} → Employment y/y: {round(row['yoy'],4)}%")
 
@@ -835,18 +850,18 @@ print(yearly.tail(6))
 def write_rate_sheet(dataset, row):
     latest = dataset.tail(3).reset_index(drop=True)
     for i, r in latest.iterrows():
-        wb.update_cell(row, 8 + i*2, r["date"].strftime("%Y-%m-%d"))
+        update_cell_with_retry(row, 8 + i*2, r["date"].strftime("%Y-%m-%d"))
         time.sleep(1)
-        wb.update_cell(row, 9 + i*2, round(r["unemployment_rate"], 2))
+        update_cell_with_retry(row, 9 + i*2, round(r["unemployment_rate"], 2))
         time.sleep(1)
         print(f"{r['date'].strftime('%Y-%m-%d')} → Unemployment rate: {round(r['unemployment_rate'],2)}%")
 
 def write_yoy_sheet(dataset, row):
     latest = dataset.tail(3).reset_index(drop=True)
     for i, r in latest.iterrows():
-        wb.update_cell(row, 8 + i*2, r["date"].strftime("%Y-%m-%d"))
+        update_cell_with_retry(row, 8 + i*2, r["date"].strftime("%Y-%m-%d"))
         time.sleep(1)
-        wb.update_cell(row, 9 + i*2, round(r["yoy_change"], 2))
+        update_cell_with_retry(row, 9 + i*2, round(r["yoy_change"], 2))
         time.sleep(1)
         print(f"{r['date'].strftime('%Y-%m-%d')} → Unemployment YoY change: {round(r['yoy_change'],2)}pp")
 
@@ -910,9 +925,9 @@ print(yearly.tail(6))
 def write_sheet(dataset, row):
     latest = dataset.tail(3).reset_index(drop=True)
     for i, r in latest.iterrows():
-        wb.update_cell(row, 14 + i*2, r["date"].strftime("%Y-%m-%d"))
+        update_cell_with_retry(row, 14 + i*2, r["date"].strftime("%Y-%m-%d"))
         time.sleep(1)
-        wb.update_cell(row, 15 + i*2, round(r["participation_rate"], 2))
+        update_cell_with_retry(row, 15 + i*2, round(r["participation_rate"], 2))
         time.sleep(1)
         print(f"{r['date'].strftime('%Y-%m-%d')} → {round(r['participation_rate'],2)}%")
 
@@ -977,9 +992,9 @@ print(yearly.tail(6))
 def write_wage_sheet(df, row):
     latest = df.tail(3).reset_index(drop=True)
     for i, r in latest.iterrows():
-        wb.update_cell(row, 20 + i*2, r["date"].strftime("%Y-%m-%d"))
+        update_cell_with_retry(row, 20 + i*2, r["date"].strftime("%Y-%m-%d"))
         time.sleep(1)
-        wb.update_cell(row, 21 + i*2, round(r["wage_growth"], 4))
+        update_cell_with_retry(row, 21 + i*2, round(r["wage_growth"], 4))
         time.sleep(1)
         print(f"{r['date'].strftime('%Y-%m-%d')} → Wage growth: {round(r['wage_growth'],4)}%")
 
@@ -1034,9 +1049,9 @@ print(yearly.tail(6))
 def write_vacancy_sheet(dataset, row, value_column):
     latest = dataset.tail(3).reset_index(drop=True)
     for i, r in latest.iterrows():
-        wb.update_cell(row, 26 + i*2, r["date"].strftime("%Y-%m-%d"))
+        update_cell_with_retry(row, 26 + i*2, r["date"].strftime("%Y-%m-%d"))
         time.sleep(1)
-        wb.update_cell(row, 27 + i*2, round(r[value_column], 4))
+        update_cell_with_retry(row, 27 + i*2, round(r[value_column], 4))
         time.sleep(1)
         print(f"{r['date'].strftime('%Y-%m-%d')} → {value_column}: {round(r[value_column],4)}")
 
