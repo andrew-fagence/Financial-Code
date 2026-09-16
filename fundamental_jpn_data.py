@@ -886,6 +886,11 @@ print("\nJapan Unemployment Rate updated successfully")
 # =============================================================================
 # JAPAN LABOUR FORCE PARTICIPATION RATE
 # =============================================================================
+try:
+    import html5lib
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "html5lib"])
+
 URL = "https://ecitizen.jp/statdb/StatsData/0003005865"
 html = requests.get(URL, headers=HEADERS, timeout=60).text
 tables = pd.read_html(StringIO(html))
