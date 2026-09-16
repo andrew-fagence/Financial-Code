@@ -886,61 +886,61 @@ print("\nJapan Unemployment Rate updated successfully")
 # =============================================================================
 # JAPAN LABOUR FORCE PARTICIPATION RATE
 # =============================================================================
-# try:
-#     import html5lib
-# except ImportError:
-#     subprocess.check_call([sys.executable, "-m", "pip", "install", "html5lib"])
-# 
-# URL = "https://ecitizen.jp/statdb/StatsData/0003005865"
-# html = requests.get(URL, headers=HEADERS, timeout=60).text
-# tables = pd.read_html(StringIO(html))
-# t = max(tables, key=lambda x: x.shape[0])
-# t.columns = [str(c).strip() for c in t.columns]
-# 
-# t = t[
-#     (t.iloc[:, 0].astype(str) == "率") &
-#     (t.iloc[:, 1].astype(str) == "全産業") &
-#     (t.iloc[:, 2].astype(str) == "労働力人口") &
-#     (t.iloc[:, 3].astype(str) == "総数") &
-#     (t.iloc[:, 4].astype(str) == "全国")
-# ].copy()
-# 
-# t["date"] = pd.to_datetime(
-#     t.iloc[:, 5].astype(str).str.replace("年", "-", regex=False).str.replace("月", "", regex=False),
-#     format="%Y-%m",
-#     errors="coerce"
-# )
-# t["lfpr"] = pd.to_numeric(t.iloc[:, 7], errors="coerce")
-# 
-# df = t[["date", "lfpr"]].dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
-# 
-# if len(df) < 15:
-#     raise Exception(f"Too few LFPR observations: {len(df)}")
-# 
-# monthly = df.tail(3).reset_index(drop=True)
-# 
-# q = df.copy()
-# q["quarter"] = q["date"].dt.to_period("Q")
-# q = q.groupby("quarter").filter(lambda x: len(x) == 3)
-# quarterly = q.groupby("quarter")["lfpr"].mean().tail(3).reset_index(name="lfpr")
-# quarterly["date"] = quarterly["quarter"].dt.end_time.dt.normalize()
-# 
-# y = df.copy()
-# y["yoy"] = y["lfpr"] - y["lfpr"].shift(12)
-# yearly = y.dropna(subset=["yoy"]).tail(3)
-# 
-# def vals(d, col):
-#     out = []
-#     for _, x in d.iterrows():
-#         out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 2)]
-#     return out
-# 
-# api_retry(wb.batch_update, [
-#     {"range": "N117:S117", "values": [vals(monthly, "lfpr")]},
-#     {"range": "N122:S122", "values": [vals(quarterly, "lfpr")]},
-#     {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
-# ])
-# print("\nJapan Labour Force Participation Rate updated successfully")
+try:
+    import html5lib
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "html5lib"])
+
+URL = "https://ecitizen.jp/statdb/StatsData/0003005865"
+html = requests.get(URL, headers=HEADERS, timeout=60).text
+tables = pd.read_html(StringIO(html))
+t = max(tables, key=lambda x: x.shape[0])
+t.columns = [str(c).strip() for c in t.columns]
+
+t = t[
+    (t.iloc[:, 0].astype(str) == "率") &
+    (t.iloc[:, 1].astype(str) == "全産業") &
+    (t.iloc[:, 2].astype(str) == "労働力人口") &
+    (t.iloc[:, 3].astype(str) == "総数") &
+    (t.iloc[:, 4].astype(str) == "全国")
+].copy()
+
+t["date"] = pd.to_datetime(
+    t.iloc[:, 5].astype(str).str.replace("年", "-", regex=False).str.replace("月", "", regex=False),
+    format="%Y-%m",
+    errors="coerce"
+)
+t["lfpr"] = pd.to_numeric(t.iloc[:, 7], errors="coerce")
+
+df = t[["date", "lfpr"]].dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
+
+if len(df) < 15:
+    raise Exception(f"Too few LFPR observations: {len(df)}")
+
+monthly = df.tail(3).reset_index(drop=True)
+
+q = df.copy()
+q["quarter"] = q["date"].dt.to_period("Q")
+q = q.groupby("quarter").filter(lambda x: len(x) == 3)
+quarterly = q.groupby("quarter")["lfpr"].mean().tail(3).reset_index(name="lfpr")
+quarterly["date"] = quarterly["quarter"].dt.end_time.dt.normalize()
+
+y = df.copy()
+y["yoy"] = y["lfpr"] - y["lfpr"].shift(12)
+yearly = y.dropna(subset=["yoy"]).tail(3)
+
+def vals(d, col):
+    out = []
+    for _, x in d.iterrows():
+        out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 2)]
+    return out
+
+api_retry(wb.batch_update, [
+    {"range": "N117:S117", "values": [vals(monthly, "lfpr")]},
+    {"range": "N122:S122", "values": [vals(quarterly, "lfpr")]},
+    {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
+])
+print("\nJapan Labour Force Participation Rate updated successfully")
 
 
 # =============================================================================
@@ -1049,43 +1049,43 @@ print("\nJapan Initial Jobless Claims proxy updated successfully")
 # =============================================================================
 # JAPAN JOB OPENINGS
 # =============================================================================
-URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040478164&fileKind=0"
-r = requests.get(URL, headers=HEADERS, timeout=60)
-r.raise_for_status()
-raw = pd.read_excel(BytesIO(r.content), header=None)
-
-months_list = range(1, 13)
-rows = []
-
-for i in range(5, len(raw)):
-    y_val = str(raw.iloc[i, 0]).replace("年", "").strip()
-    if not y_val.isdigit(): continue
-    y_val = int(y_val)
-    for m_val in months_list:
-        v = pd.to_numeric(raw.iloc[i, 19 + m_val], errors="coerce")
-        if pd.notna(v):
-            rows.append([pd.Timestamp(y_val, m_val, 1), float(v)])
-
-df = pd.DataFrame(rows, columns=["date", "openings"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
-
-df["monthly"] = df["openings"].pct_change() * 100
-monthly = df.dropna(subset=["monthly"]).tail(3)
-
-q = df.assign(q=df.date.dt.to_period("Q"))
-q = q.groupby("q").filter(lambda x: len(x) == 3).groupby("q").openings.mean()
-quarterly = q.pct_change().mul(100).dropna().tail(3).reset_index(name="quarterly")
-quarterly["date"] = quarterly.q.dt.end_time.dt.normalize()
-
-df["yearly"] = df["openings"].pct_change(12) * 100
-yearly = df.dropna(subset=["yearly"]).tail(3)
-
-def vals_openings(d, c):
-    return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
-
-api_retry(wb.batch_update, [
-    {"range": "AF117:AK117", "values": [vals_openings(monthly, "monthly")]},
-    {"range": "AF122:AK122", "values": [vals_openings(quarterly, "quarterly")]},
-    {"range": "AF127:AK127", "values": [vals_openings(yearly, "yearly")]}
-])
-
-print("\nJapan Job Openings updated successfully")
+# URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040478164&fileKind=0"
+# r = requests.get(URL, headers=HEADERS, timeout=60)
+# r.raise_for_status()
+# raw = pd.read_excel(BytesIO(r.content), header=None)
+# 
+# months_list = range(1, 13)
+# rows = []
+# 
+# for i in range(5, len(raw)):
+#     y_val = str(raw.iloc[i, 0]).replace("年", "").strip()
+#     if not y_val.isdigit(): continue
+#     y_val = int(y_val)
+#     for m_val in months_list:
+#         v = pd.to_numeric(raw.iloc[i, 19 + m_val], errors="coerce")
+#         if pd.notna(v):
+#             rows.append([pd.Timestamp(y_val, m_val, 1), float(v)])
+# 
+# df = pd.DataFrame(rows, columns=["date", "openings"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+# 
+# df["monthly"] = df["openings"].pct_change() * 100
+# monthly = df.dropna(subset=["monthly"]).tail(3)
+# 
+# q = df.assign(q=df.date.dt.to_period("Q"))
+# q = q.groupby("q").filter(lambda x: len(x) == 3).groupby("q").openings.mean()
+# quarterly = q.pct_change().mul(100).dropna().tail(3).reset_index(name="quarterly")
+# quarterly["date"] = quarterly.q.dt.end_time.dt.normalize()
+# 
+# df["yearly"] = df["openings"].pct_change(12) * 100
+# yearly = df.dropna(subset=["yearly"]).tail(3)
+# 
+# def vals_openings(d, c):
+#     return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
+# 
+# api_retry(wb.batch_update, [
+#     {"range": "AF117:AK117", "values": [vals_openings(monthly, "monthly")]},
+#     {"range": "AF122:AK122", "values": [vals_openings(quarterly, "quarterly")]},
+#     {"range": "AF127:AK127", "values": [vals_openings(yearly, "yearly")]}
+# ])
+# 
+# print("\nJapan Job Openings updated successfully")
