@@ -14,7 +14,7 @@ SPREADSHEET_ID = "1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU"
 CREDENTIALS_FILE = "forexdailybias-5ce3a8ede6c9.json"  # Fallback path
 DATA_DIR = "./x-scraper/data" # Base directory where the scraper outputs files
 
-def ensure_config_file(max_tweets=70):
+def ensure_config_file(max_tweets=120):
     """
     Dynamically generates the config.ini file inside the cloned scraper directory
     using environment variables for security.
