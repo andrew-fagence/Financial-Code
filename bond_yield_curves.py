@@ -129,18 +129,38 @@ async function writeToGoogleSheets(results) {
         r.price === null ? '' : r.price
     );
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: 'Sheet1!B146:K146',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-            values: [values]
-        }
-    });
+    let attempt = 0;
+    const maxRetries = 10;
 
-    console.log("\nGoogle Sheets updated:");
-    console.log("Sheet1!B146:K146");
-    console.log(values);
+    while (attempt < maxRetries) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: 'Sheet1!B146:K146',
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [values]
+                }
+            });
+
+            console.log("\nGoogle Sheets updated:");
+            console.log("Sheet1!B146:K146");
+            console.log(values);
+            break; // Break the loop on success
+        } catch (err) {
+            attempt++;
+            console.error(`\nError updating Google Sheets (Attempt ${attempt} of ${maxRetries}):`, err.message || err);
+            
+            if (attempt >= maxRetries) {
+                throw err; // Re-throw error if max retries met
+            }
+            
+            // Wait increasingly longer (10s, 20s, 30s...) before retrying
+            const waitMs = attempt * 10000;
+            console.log(`Waiting ${waitMs / 1000} seconds before retrying...`);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+    }
 }
 
 (async () => {
@@ -303,18 +323,37 @@ async function writeToGoogleSheets(results) {
         r.price === null ? '' : r.price
     );
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: 'Sheet1!B147:K147',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-            values: [values]
-        }
-    });
+    let attempt = 0;
+    const maxRetries = 10;
 
-    console.log("\nGoogle Sheets updated:");
-    console.log("Sheet1!B146:K146");
-    console.log(values);
+    while (attempt < maxRetries) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: 'Sheet1!B147:K147',
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [values]
+                }
+            });
+
+            console.log("\nGoogle Sheets updated:");
+            console.log("Sheet1!B146:K146");
+            console.log(values);
+            break;
+        } catch (err) {
+            attempt++;
+            console.error(`\nError updating Google Sheets (Attempt ${attempt} of ${maxRetries}):`, err.message || err);
+            
+            if (attempt >= maxRetries) {
+                throw err;
+            }
+            
+            const waitMs = attempt * 10000;
+            console.log(`Waiting ${waitMs / 1000} seconds before retrying...`);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+    }
 }
 
 (async () => {
@@ -477,18 +516,37 @@ async function writeToGoogleSheets(results) {
         r.price === null ? '' : r.price
     );
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: 'Sheet1!B148:K148',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-            values: [values]
-        }
-    });
+    let attempt = 0;
+    const maxRetries = 10;
 
-    console.log("\nGoogle Sheets updated:");
-    console.log("Sheet1!B148:K148");
-    console.log(values);
+    while (attempt < maxRetries) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: 'Sheet1!B148:K148',
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [values]
+                }
+            });
+
+            console.log("\nGoogle Sheets updated:");
+            console.log("Sheet1!B148:K148");
+            console.log(values);
+            break;
+        } catch (err) {
+            attempt++;
+            console.error(`\nError updating Google Sheets (Attempt ${attempt} of ${maxRetries}):`, err.message || err);
+            
+            if (attempt >= maxRetries) {
+                throw err;
+            }
+            
+            const waitMs = attempt * 10000;
+            console.log(`Waiting ${waitMs / 1000} seconds before retrying...`);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+    }
 }
 
 (async () => {
@@ -651,18 +709,37 @@ async function writeToGoogleSheets(results) {
         r.price === null ? '' : r.price
     );
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: 'Sheet1!B149:K149',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-            values: [values]
-        }
-    });
+    let attempt = 0;
+    const maxRetries = 10;
 
-    console.log("\nGoogle Sheets updated:");
-    console.log("Sheet1!B149:K149");
-    console.log(values);
+    while (attempt < maxRetries) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: 'Sheet1!B149:K149',
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [values]
+                }
+            });
+
+            console.log("\nGoogle Sheets updated:");
+            console.log("Sheet1!B149:K149");
+            console.log(values);
+            break;
+        } catch (err) {
+            attempt++;
+            console.error(`\nError updating Google Sheets (Attempt ${attempt} of ${maxRetries}):`, err.message || err);
+            
+            if (attempt >= maxRetries) {
+                throw err;
+            }
+            
+            const waitMs = attempt * 10000;
+            console.log(`Waiting ${waitMs / 1000} seconds before retrying...`);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+        }
+    }
 }
 
 (async () => {
