@@ -242,15 +242,35 @@ async function writeToSheet() {
         });
     }
 
-    await sheets.spreadsheets.values.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-            valueInputOption: 'USER_ENTERED',
-            data
-        }
-    });
+    let retries = 0;
+    const maxRetries = 10;
 
-    console.log('Google Sheets updated (DXY + JPY CRT rows)');
+    while (true) {
+        try {
+            await sheets.spreadsheets.values.batchUpdate({
+                spreadsheetId,
+                requestBody: {
+                    valueInputOption: 'USER_ENTERED',
+                    data
+                }
+            });
+
+            console.log('Google Sheets updated (DXY + JPY CRT rows)');
+            break;
+        } catch (error) {
+            console.error(`Error updating Google Sheets: ${error.message}`);
+            
+            if (retries >= maxRetries) {
+                console.error('Max retries reached. Failed to update Google Sheets.');
+                break;
+            }
+            
+            retries++;
+            const waitTime = 10000 * retries; // Progressive wait: 10s, 20s, 30s...
+            console.log(`Retrying in ${waitTime / 1000} seconds... (Retry ${retries} of ${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+    }
 }
 
 // =====================================================
