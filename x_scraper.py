@@ -393,7 +393,7 @@ def update_google_sheet_with_tweets(accounts):
 
         count = 0
         for tweet in tweets:
-            if count >= 70:
+            if count >= 120:
                 break
             content = tweet.get("text", "").strip()
             if not content:
@@ -514,7 +514,7 @@ if __name__ == "__main__":
     ]
 
     # Generate config.ini for the scraper using environment variables
-    ensure_config_file(max_tweets=70)
+    ensure_config_file(max_tweets=120)
 
     # 1. Ensure codebase is patched to support multiple modal designs and "Continue" buttons
     patch_scraper_source()
