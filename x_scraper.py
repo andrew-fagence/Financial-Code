@@ -285,44 +285,64 @@ def scrape_all_accounts(accounts):
     success_count = 0
     for acc in accounts:
         username = acc["username"]
-        print(f"Starting X-Scraper for {username}...\n")
-        print(f"--- SCRAPER LOGS FOR {username} START ---")
+        
+        # Implement maximum of 5 attempts for robustness against X rate-limits or unrendered pages
+        max_retries = 5
+        for attempt in range(1, max_retries + 1):
+            print(f"Starting X-Scraper for {username} (Attempt {attempt}/{max_retries})...\n")
+            print(f"--- SCRAPER LOGS FOR {username} START ---")
 
-        # Prefixing the command with xvfb-run to provide a virtual cloud monitor
-        cmd = [
-            "xvfb-run",
-            "--auto-servernum",
-            "uv",
-            "run",
-            "main.py",
-            "user",
-            "--username", username
-        ]
+            # Prefixing the command with xvfb-run to provide a virtual cloud monitor
+            cmd = [
+                "xvfb-run",
+                "--auto-servernum",
+                "uv",
+                "run",
+                "main.py",
+                "user",
+                "--username", username
+            ]
 
-        # Force Python to not buffer the output
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
+            # Force Python to not buffer the output
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
 
-        result = subprocess.run(
-            cmd,
-            cwd="./x-scraper",
-            capture_output=True,
-            text=True,
-            env=env
-        )
+            result = subprocess.run(
+                cmd,
+                cwd="./x-scraper",
+                capture_output=True,
+                text=True,
+                env=env
+            )
 
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(f"ERRORS/WARNINGS FOR {username}:")
-            print(result.stderr)
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(f"ERRORS/WARNINGS FOR {username}:")
+                print(result.stderr)
 
-        print(f"--- SCRAPER LOGS FOR {username} END ---\n")
+            print(f"--- SCRAPER LOGS FOR {username} END ---\n")
+            
+            combined_output = (result.stdout or "") + (result.stderr or "")
 
-        if result.returncode != 0:
-            print(f"Scraper crashed or exited with an error code for {username}.")
-        else:
+            if result.returncode != 0:
+                print(f"Scraper crashed or exited with an error code for {username}.")
+                if attempt < max_retries:
+                    print("Retrying in 5 seconds...")
+                    time.sleep(5)
+                continue
+                
+            # If the scraper ran successfully but failed to find any tweets (i.e. page didn't load properly)
+            if "Total tweets collected: 0" in combined_output or "Found 0 tweets" in combined_output or "No tweets found" in combined_output:
+                print(f"Scraper collected 0 tweets for {username}.")
+                if attempt < max_retries:
+                    print("Retrying in 5 seconds...")
+                    time.sleep(5)
+                continue
+            
+            # Scrape completely successful and tweets found!
             success_count += 1
+            break
 
     return success_count > 0
 
@@ -393,7 +413,7 @@ def update_google_sheet_with_tweets(accounts):
 
         count = 0
         for tweet in tweets:
-            if count >= 120:
+            if count >= 70:
                 break
             content = tweet.get("text", "").strip()
             if not content:
@@ -514,7 +534,7 @@ if __name__ == "__main__":
     ]
 
     # Generate config.ini for the scraper using environment variables
-    ensure_config_file(max_tweets=120)
+    ensure_config_file(max_tweets=70)
 
     # 1. Ensure codebase is patched to support multiple modal designs and "Continue" buttons
     patch_scraper_source()
