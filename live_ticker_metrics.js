@@ -26,6 +26,14 @@ const configs = [
     { symbol: 'CRYPTO:BTCUSD', row: 69 }
 ];
 
+// Configuration for the newly requested extra data (Cols P & Q)
+const extraConfigs = [
+    { symbol: 'OANDA:EURUSD', row: 53 },
+    { symbol: 'OANDA:GBPUSD', row: 54 },
+    { symbol: 'OANDA:EURJPY', row: 55 },
+    { symbol: 'OANDA:GBPJPY', row: 56 }
+];
+
 // =====================================================
 // GOOGLE SHEETS AUTH
 // =====================================================
@@ -69,6 +77,29 @@ async function writeToSheet(row, data) {
     });
 
     console.log(`Google Sheets updated for row ${row}`);
+}
+
+async function writeExtraToSheet(row, data) {
+    const authClient = await auth.getClient();
+
+    const sheets = google.sheets({
+        version: 'v4',
+        auth: authClient
+    });
+
+    await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `Sheet1!P${row}:Q${row}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+            values: [[
+                data.prev1mHigh,
+                data.recent15mClose
+            ]]
+        }
+    });
+
+    console.log(`Google Sheets updated extra data for row ${row}`);
 }
 
 // =====================================================
@@ -199,12 +230,73 @@ async function processSymbol(symbol, row) {
 }
 
 // =====================================================
+// PROCESS EXTRA SYMBOL (1m High & 15m Close)
+// =====================================================
+async function processExtraSymbol(symbol, row) {
+    return new Promise((resolve) => {
+        console.log(`\n================================`);
+        console.log(`PROCESSING EXTRA DATA for ${symbol}`);
+        console.log(`================================`);
+
+        let done1m = false;
+        let done15m = false;
+        let finished = false;
+
+        const data = { prev1mHigh: null, recent15mClose: null };
+
+        async function finish() {
+            if (finished) return;
+            if (done1m && done15m) {
+                finished = true;
+                await writeExtraToSheet(row, data);
+                resolve();
+            }
+        }
+
+        // --- 1 MINUTE ---
+        const chart1m = new client.Session.Chart();
+        chart1m.setMarket(symbol, { timeframe: '1' });
+        chart1m.onUpdate(() => {
+            if (!chart1m.periods || chart1m.periods.length < 2) return;
+            // periods[1] represents the previously completed candle
+            const prev = chart1m.periods[1];
+            data.prev1mHigh = prev.max;
+
+            console.log(`\n${symbol} 1M\nPrev 1m High: ${data.prev1mHigh}`);
+            done1m = true;
+            finish();
+        });
+
+        // --- 15 MINUTE ---
+        const chart15m = new client.Session.Chart();
+        chart15m.setMarket(symbol, { timeframe: '15' });
+        chart15m.onUpdate(() => {
+            if (!chart15m.periods || chart15m.periods.length < 2) return;
+            // periods[1] represents the most recently completed (closed) candle
+            const recent = chart15m.periods[1];
+            data.recent15mClose = recent.close;
+
+            console.log(`\n${symbol} 15M\nRecent 15m Close: ${data.recent15mClose}`);
+            done15m = true;
+            finish();
+        });
+    });
+}
+
+// =====================================================
 // MAIN
 // =====================================================
 (async () => {
+    // 1. Process original symbols
     for (const config of configs) {
         await processSymbol(config.symbol, config.row);
     }
+    
+    // 2. Process newly requested 1m and 15m extra pairs
+    for (const config of extraConfigs) {
+        await processExtraSymbol(config.symbol, config.row);
+    }
+
     client.end();
     console.log('\nALL SYMBOLS COMPLETE');
 })();
