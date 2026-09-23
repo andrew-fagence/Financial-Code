@@ -40,7 +40,7 @@ def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -
     for attempt in range(10):
         try:
             response = client.models.generate_content(
-                model='gemini-3.5-flash',
+                model='gemini-3.7-flash',
                 contents=augmented_prompt  # CHANGED: Passed the augmented prompt instead of the raw prompt
             )
             return response.text.strip()
