@@ -20,12 +20,22 @@ def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -
             return response.text.strip()
         except Exception as e:
             error_msg = str(e)
-            # Checks explicitly for the 503 high demand unavailability error
+            
+            # 1. ADD THIS BLOCK: Handle 429 Quota Exceeded errors
+            if "429" in error_msg:
+                if attempt < 9:
+                    wait_time = 10 * (attempt + 1) # Incremental backoff (10s, 20s, 30s...)
+                    print(f"[{region}] Rate limit exceeded (429). Retrying in {wait_time} seconds (Attempt {attempt + 2}/10)...")
+                    time.sleep(wait_time)
+                    continue
+
+            # 2. Existing 503 high demand unavailability error check
             if "503" in error_msg and "UNAVAILABLE" in error_msg and "high demand" in error_msg:
                 if attempt < 9:
                     print(f"[{region}] Model in high demand (503). Retrying in 5 seconds (Attempt {attempt + 2}/10)...")
                     time.sleep(5)
                     continue
+                    
             return f"AI generation failed: {e}"
 
 def update_google_sheets(spreadsheet_id: str, credentials_json_str: str, data: dict):
