@@ -3,7 +3,6 @@ import json
 import os
 import gspread
 from google import genai
-from google.genai import types
 
 def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -> str:
     """Queries Gemini with the provided prompt."""
