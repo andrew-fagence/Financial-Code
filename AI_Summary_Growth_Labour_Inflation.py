@@ -6,16 +6,12 @@ from google import genai
 from google.genai import types
 
 def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -> str:
-    """Queries Gemini with the provided prompt and utilizes Google Search Grounding."""
+    """Queries Gemini with the provided prompt."""
     for attempt in range(10):
         try:
             response = client.models.generate_content(
                 model='gemini-3.5-flash',
-                contents=prompt,
-                # Enables Grounding with Google Search to get real-time context
-                config=types.GenerateContentConfig(
-                    tools=[types.Tool(google_search=types.GoogleSearch())]
-                )
+                contents=prompt
             )
             return response.text.strip()
         except Exception as e:
