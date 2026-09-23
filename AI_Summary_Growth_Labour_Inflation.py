@@ -3,14 +3,45 @@ import json
 import os
 import gspread
 from google import genai
+from duckduckgo_search import DDGS  # ADDED: Import for DuckDuckGo Search
+
+def fetch_duckduckgo_context(region: str) -> str:
+    """Fetches live web search results from DuckDuckGo based on the region."""
+    # Maps the region to a highly specific search query to get the best live data
+    queries = {
+        "USD": "USA current inflation, growth and labour metrics economic news",
+        "EUR": "Eurozone EU current inflation, growth and labour metrics economic news",
+        "GBP": "UK current inflation, growth and labour metrics economic news",
+        "JPY": "Japan current inflation, growth and labour metrics economic news"
+    }
+    query = queries.get(region, f"{region} current inflation growth labour metrics news")
+    
+    try:
+        results = DDGS().text(query, max_results=5)
+        if not results:
+            return "No recent search results found."
+        
+        # Formats the returned snippets into a readable context block
+        context = ""
+        for r in results:
+            context += f"- {r.get('title')}: {r.get('body')}\n"
+        return context
+    except Exception as e:
+        return f"Could not fetch search context: {e}"
 
 def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -> str:
     """Queries Gemini with the provided prompt."""
+    
+    # --- ADDED: Fetch DuckDuckGo context and augment the prompt ---
+    search_context = fetch_duckduckgo_context(region)
+    augmented_prompt = f"Live Web Context from DuckDuckGo Search:\n{search_context}\n\nTask:\n{prompt}"
+    # --------------------------------------------------------------
+
     for attempt in range(10):
         try:
             response = client.models.generate_content(
                 model='gemini-3.5-flash',
-                contents=prompt
+                contents=augmented_prompt  # CHANGED: Passed the augmented prompt instead of the raw prompt
             )
             return response.text.strip()
         except Exception as e:
