@@ -17,7 +17,7 @@ def fetch_duckduckgo_context(region: str) -> str:
     query = queries.get(region, f"{region} current inflation growth labour metrics news")
     
     try:
-        results = DDGS().text(query, max_results=5)
+        results = DDGS().text(query, max_results=10)
         if not results:
             return "No recent search results found."
         
@@ -125,10 +125,10 @@ if __name__ == "__main__":
 
     print("Generating AI sentiment summaries with Google Search Grounding...\n")
 
-    usd_prompt = "Give me a 100 word paragraph of the current sentiment of the USA inflation, growth and labour metrics that will affect the EURUSD and GBPUSD forex pairs for the next day. Dont give bias or even mention EURGBP, EURJPY or GBPJPY in your response. Just summarise and give sentiment on the USA inflation, growth and labour data."
-    eur_prompt = "Give me a 100 word paragraph of the current sentiment of the EU inflation, growth and labour metrics that will affect the EURUSD, EURGBP and EURJPY forex pairs for the next day. Dont give bias or even mention GBPUSD or GBPJPY in your response. Just summarise and give sentiment on the EU inflation, growth and labour data."
-    gbp_prompt = "Give me a 100 word paragraph of the current sentiment of the UK inflation, growth and labour metrics that will affect the EURGBP, GBPUSD and GBPJPY forex pairs for the next day. Dont give bias or even mention EURUSD or EURJPY in your response. Just summarise and give sentiment on the UK inflation, growth and labour data."
-    jpy_prompt = "Give me a 100 word paragraph of the current sentiment of the Japan inflation, growth and labour metrics that will affect the EURJPY and GBPJPY forex pairs for the next day. Dont give bias or even mention EURUSD, EURGBP or GBPUSD in your response. Just summarise and give sentiment on the Japan inflation, growth and labour data."
+    usd_prompt = "Give me a 40 word paragraph of the current sentiment of the USA inflation, growth and labour metrics that will affect the EURUSD and GBPUSD forex pairs for the next day. Dont give bias or even mention EURGBP, EURJPY or GBPJPY in your response. Just summarise and give sentiment on the USA inflation, growth and labour data."
+    eur_prompt = "Give me a 40 word paragraph of the current sentiment of the EU inflation, growth and labour metrics that will affect the EURUSD, EURGBP and EURJPY forex pairs for the next day. Dont give bias or even mention GBPUSD or GBPJPY in your response. Just summarise and give sentiment on the EU inflation, growth and labour data."
+    gbp_prompt = "Give me a 40 word paragraph of the current sentiment of the UK inflation, growth and labour metrics that will affect the EURGBP, GBPUSD and GBPJPY forex pairs for the next day. Dont give bias or even mention EURUSD or EURJPY in your response. Just summarise and give sentiment on the UK inflation, growth and labour data."
+    jpy_prompt = "Give me a 40 word paragraph of the current sentiment of the Japan inflation, growth and labour metrics that will affect the EURJPY and GBPJPY forex pairs for the next day. Dont give bias or even mention EURUSD, EURGBP or GBPUSD in your response. Just summarise and give sentiment on the Japan inflation, growth and labour data."
 
     try:
         usd_summary = get_ai_summary_with_search(client, "USD", usd_prompt)
