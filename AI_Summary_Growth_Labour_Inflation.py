@@ -3,7 +3,7 @@ import json
 import os
 import gspread
 from google import genai
-from duckduckgo_search import DDGS  # ADDED: Import for DuckDuckGo Search
+from ddgs import DDGS  # ADDED: Import for DuckDuckGo Search
 
 def fetch_duckduckgo_context(region: str) -> str:
     """Fetches live web search results from DuckDuckGo based on the region."""
