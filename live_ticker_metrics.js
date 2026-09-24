@@ -57,26 +57,39 @@ async function writeToSheet(row, data) {
         auth: authClient // Pass the resolved client here
     });
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `Sheet1!B${row}:J${row}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-            values: [[
-                data.pdh,
-                data.pd50,
-                data.pdl,
-                data.pwh,
-                data.pw50,
-                data.pwl,
-                data.dailyTrueOpen,
-                data.asiaHigh,
-                data.asiaLow
-            ]]
-        }
-    });
+    const maxRetries = 10;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: `Sheet1!B${row}:J${row}`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [[
+                        data.pdh,
+                        data.pd50,
+                        data.pdl,
+                        data.pwh,
+                        data.pw50,
+                        data.pwl,
+                        data.dailyTrueOpen,
+                        data.asiaHigh,
+                        data.asiaLow
+                    ]]
+                }
+            });
 
-    console.log(`Google Sheets updated for row ${row}`);
+            console.log(`Google Sheets updated for row ${row}`);
+            return; // Success, exit the loop and function
+        } catch (error) {
+            if (attempt === maxRetries) {
+                console.error(`Failed to update Google Sheets for row ${row} after ${maxRetries} attempts.`, error);
+                throw error;
+            }
+            console.log(`Rate limit or error encountered for row ${row}. Retrying in 5 seconds... (Attempt ${attempt} of ${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+    }
 }
 
 async function writeExtraToSheet(row, data) {
@@ -87,19 +100,32 @@ async function writeExtraToSheet(row, data) {
         auth: authClient
     });
 
-    await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range: `Sheet1!P${row}:Q${row}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-            values: [[
-                data.prev1mHigh,
-                data.recent15mClose
-            ]]
-        }
-    });
+    const maxRetries = 10;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range: `Sheet1!P${row}:Q${row}`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values: [[
+                        data.prev1mHigh,
+                        data.recent15mClose
+                    ]]
+                }
+            });
 
-    console.log(`Google Sheets updated extra data for row ${row}`);
+            console.log(`Google Sheets updated extra data for row ${row}`);
+            return; // Success, exit the loop and function
+        } catch (error) {
+            if (attempt === maxRetries) {
+                console.error(`Failed to update Google Sheets extra data for row ${row} after ${maxRetries} attempts.`, error);
+                throw error;
+            }
+            console.log(`Rate limit or error encountered for extra data row ${row}. Retrying in 5 seconds... (Attempt ${attempt} of ${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+    }
 }
 
 // =====================================================
