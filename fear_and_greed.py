@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import gspread
 import requests
 from google.oauth2.service_account import Credentials
@@ -52,15 +53,28 @@ def update_market_data():
         # 5. Push data to spreadsheet rows
         print("Pushing data to spreadsheet...")
 
-        # Stock Market updates (Cells E40 & E41)
-        sheet.update_acell('E40', stock_score)
-        sheet.update_acell('E41', stock_sentiment)
+        max_attempts = 10
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Stock Market updates (Cells E40 & E41)
+                sheet.update_acell('E40', stock_score)
+                sheet.update_acell('E41', stock_sentiment)
 
-        # Crypto updates (Cells E43 & E44)
-        sheet.update_acell('E43', crypto_score)
-        sheet.update_acell('E44', crypto_sentiment)
+                # Crypto updates (Cells E43 & E44)
+                sheet.update_acell('E43', crypto_score)
+                sheet.update_acell('E44', crypto_sentiment)
 
-        print("All data successfully synced to Google Sheets!")
+                print("All data successfully synced to Google Sheets!")
+                break  # Success, exit the retry loop
+                
+            except Exception as e:
+                # Check if it's a 429 Quota Exceeded Error and if we have attempts left
+                if '429' in str(e) and attempt < max_attempts:
+                    print(f"Quota exceeded (429). Retrying attempt {attempt}/{max_attempts} in 10 seconds...")
+                    time.sleep(10) # Pause before trying again so the API limit resets
+                else:
+                    # If it's a different error or we've maxed out on retries, raise the exception
+                    raise e
 
     except Exception as e:
         print(f"An error occurred: {e}", file=sys.stderr)
