@@ -3,6 +3,7 @@ import json
 import datetime
 import requests
 import gspread
+import time
 from oauth2client.service_account import ServiceAccountCredentials
 
 # Config
@@ -75,19 +76,33 @@ def update_discord_news_sheet():
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(SPREADSHEET_ID)
 
-        # Check if tab exists, create if not
-        try:
-            worksheet = sh.worksheet("DiscordNews")
-        except gspread.exceptions.WorksheetNotFound:
-            worksheet = sh.add_worksheet(title="DiscordNews", rows="150", cols="5")
+        # Retry logic starts here (Max 10 attempts)
+        max_attempts = 10
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Check if tab exists, create if not
+                try:
+                    worksheet = sh.worksheet("DiscordNews")
+                except gspread.exceptions.WorksheetNotFound:
+                    worksheet = sh.add_worksheet(title="DiscordNews", rows="150", cols="5")
 
-        print("Clearing old data and writing new records...")
-        worksheet.clear()
-        
-        # Write values in bulk
-        worksheet.update(range_name='A1', values=rows_to_write)
+                print("Clearing old data and writing new records...")
+                worksheet.clear()
+                
+                # Write values in bulk
+                worksheet.update(range_name='A1', values=rows_to_write)
 
-        print("DiscordNews sheet updated successfully.")
+                print("DiscordNews sheet updated successfully.")
+                break  # Exit loop if successful
+
+            except Exception as e:
+                # If we encounter the "429: Quota exceeded" error and haven't hit the attempt limit yet
+                if "429" in str(e) and attempt < max_attempts:
+                    print(f"API Error 429: Quota exceeded. Retrying ({attempt}/{max_attempts}) in 60 seconds...")
+                    time.sleep(60)
+                else:
+                    # Let the outer try-except handle other errors or final failure limit
+                    raise e
 
     except Exception as e:
         print(f"Failed to write to Google Sheet: {e}")
