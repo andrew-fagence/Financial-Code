@@ -9,10 +9,10 @@ def fetch_duckduckgo_context(region: str) -> str:
     """Fetches live web search results from DuckDuckGo based on the region."""
     # Maps the region to a highly specific search query to get the best live data
     queries = {
-        "USD": "USA current inflation, growth and labour metrics economic news",
-        "EUR": "Eurozone EU current inflation, growth and labour metrics economic news",
-        "GBP": "UK current inflation, growth and labour metrics economic news",
-        "JPY": "Japan current inflation, growth and labour metrics economic news"
+        "USD": "USA current inflation, growth and labour metrics and economic news",
+        "EUR": "EU current inflation, growth and labour metrics and economic news",
+        "GBP": "UK current inflation, growth and labour metrics and economic news",
+        "JPY": "Japan current inflation, growth and labour metrics and economic news"
     }
     query = queries.get(region, f"{region} current inflation growth labour metrics news")
     
