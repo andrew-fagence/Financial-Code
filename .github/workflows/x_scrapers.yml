@@ -69,11 +69,9 @@ jobs:
 
       - name: Run FinancialJuice Scraper
         env:
+          # Pulls secrets into the environment safely
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
-          TWITTER_EMAIL: ${{ secrets.TWITTER_EMAIL }}
-          TWITTER_PASSWORD: ${{ secrets.TWITTER_PASSWORD }}
-          PROXY_URL: ${{ secrets.PROXY_URL }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
         run: python x_scraper.py
 
       - name: Run News Scroller Scraper
