@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -9,48 +10,33 @@ import gspread
 
 def get_gspread_client():
     """Authenticates gspread using GitHub Secrets environment variable (GCP_CREDENTIALS)
-
     or falls back to a local JSON file path.
     """
-    # Look for GCP_CREDENTIALS secret first, then GCP_SERVICE_ACCOUNT fallback
-    service_account_env = os.environ.get("GCP_CREDENTIALS") or os.environ.get(
-        "GCP_SERVICE_ACCOUNT"
-    )
+    service_account_env = os.environ.get("GCP_CREDENTIALS") or os.environ.get("GCP_SERVICE_ACCOUNT")
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
 
     if service_account_env:
-        # Running in GitHub Actions
         creds_dict = json.loads(service_account_env)
         return gspread.service_account_from_dict(creds_dict, scopes=scopes)
     else:
         # Fallback for Google Colab / Local Environment
         service_account_file = "/content/forexdailybias-5ce3a8ede6c9.json"
         if os.path.exists(service_account_file):
-            return gspread.service_account(
-                filename=service_account_file, scopes=scopes
-            )
+            return gspread.service_account(filename=service_account_file, scopes=scopes)
         elif os.path.exists("forexdailybias-5ce3a8ede6c9.json"):
-            return gspread.service_account(
-                filename="forexdailybias-5ce3a8ede6c9.json", scopes=scopes
-            )
+            return gspread.service_account(filename="forexdailybias-5ce3a8ede6c9.json", scopes=scopes)
         else:
-            raise FileNotFoundError(
-                "Service account key not found in GCP_CREDENTIALS environment variable or local file."
-            )
+            raise FileNotFoundError("Service account key not found.")
 
 
 def calculate_csm_for_row(current_row, previous_row):
-    """Calculates the strength score for each of the 8 major currencies
-
-    comparing a current price row with a previous reference row.
-    Uses Logarithmic Returns for perfect symmetry and mathematical accuracy.
-    """
+    """Calculates the strength score for each of the 8 major currencies using an O(N) log-return optimization."""
     currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
 
-    # Reconstruct the price of 1 unit of each currency in USD terms
+    # 1. Reconstruct the price of 1 unit of each currency in USD terms
     prices_now = {
         "USD": 1.0,
         "EUR": float(current_row["EURUSD=X"]),
@@ -73,70 +59,56 @@ def calculate_csm_for_row(current_row, previous_row):
         "JPY": 1.0 / float(previous_row["USDJPY=X"]),
     }
 
-    strength_scores = {c: 0.0 for c in currencies}
+    # 2. Calculate log returns for each currency against the USD
+    log_returns = {}
+    for c in currencies:
+        log_returns[c] = np.log(prices_now[c] / prices_prev[c]) * 100
 
-    # Reconstruct all 28 crosses and calculate log return
-    for i in range(len(currencies)):
-        for j in range(i + 1, len(currencies)):
-            base = currencies[i]
-            quote = currencies[j]
+    sum_all_returns = sum(log_returns.values())
 
-            # Cross rate = Base Price in USD / Quote Price in USD
-            rate_now = prices_now[base] / prices_now[quote]
-            rate_prev = prices_prev[base] / prices_prev[quote]
+    # 3. Apply mathematical simplification to deduce average cross-strength
+    normalized_scores = {}
+    for c in currencies:
+        # Mathematically equivalent to averaging the log-returns of all 7 cross pairs
+        score = (8 * log_returns[c] - sum_all_returns) / 7.0
+        normalized_scores[c] = round(score, 4)
 
-            # Log Return calculation
-            log_change = np.log(rate_now / rate_prev) * 100
-
-            # Add to base currency, subtract from quote currency
-            strength_scores[base] += log_change
-            strength_scores[quote] -= log_change
-
-    # Normalize by the number of counterparts (N-1 = 7)
-    normalized_scores = {
-        c: round(score / 7.0, 4) for c, score in strength_scores.items()
-    }
     return normalized_scores
 
 
-def fetch_and_clean_data(usd_tickers, period, interval, label):
-    """Downloads historical ticker data and cleans missing/invalid entries."""
-    print(f"Fetching historical {label.lower()} rates from Yahoo Finance...")
-    data = yf.download(
-        usd_tickers, period=period, interval=interval, auto_adjust=True
-    )
+def fetch_and_clean_data(usd_tickers, period="3mo"):
+    """Downloads historical daily data. We only need daily data to construct all timeframes."""
+    print("Fetching historical daily rates from Yahoo Finance...")
+    data = yf.download(usd_tickers, period=period, interval="1d", auto_adjust=True)
 
     if data.empty:
-        raise ValueError(
-            f"Failed to retrieve {label.lower()} data from Yahoo Finance."
-        )
+        raise ValueError("Failed to retrieve data from Yahoo Finance.")
 
-    close_df = (
-        data["Close"]
-        if "Close" in data
-        else data["close"] if "close" in data else data
-    )
+    close_df = data["Close"] if "Close" in data else data["close"] if "close" in data else data
 
-    close_df = close_df.dropna(how="all")
-    close_df = close_df.ffill()
-    close_df = close_df.dropna()
+    # Clean data avoiding weekend gaps
+    close_df = close_df.dropna(how="all").ffill().dropna()
 
-    if len(close_df) < 3:
-        raise ValueError(
-            f"Insufficient {label.lower()} data returned to calculate momentum. Try again later."
-        )
+    if len(close_df) < 25:
+        raise ValueError("Insufficient data returned to calculate monthly momentum. Try again later.")
 
     return close_df
 
 
-def process_timeframe_metrics(close_df, label):
-    """Calculates CSM scores, formats report, and prepares rows for Google Sheet update."""
+def process_timeframe_metrics(close_df, lookback, label):
+    """Calculates metrics dynamically based on 'lookback' trading days ensuring perfect symmetry."""
+    
+    # Symmetrical indexing:
+    # Today's momentum = Today vs N days ago
     row_today = close_df.iloc[-1]
+    row_today_prev = close_df.iloc[-1 - lookback]
+    
+    # Yesterday's momentum = Yesterday vs (N+1) days ago
     row_yesterday = close_df.iloc[-2]
-    row_day_before = close_df.iloc[-3]
+    row_yesterday_prev = close_df.iloc[-2 - lookback]
 
-    strength_today = calculate_csm_for_row(row_today, row_yesterday)
-    strength_yesterday = calculate_csm_for_row(row_yesterday, row_day_before)
+    strength_today = calculate_csm_for_row(row_today, row_today_prev)
+    strength_yesterday = calculate_csm_for_row(row_yesterday, row_yesterday_prev)
 
     report_data = []
     for cur in strength_today:
@@ -144,9 +116,9 @@ def process_timeframe_metrics(close_df, label):
         yest_val = strength_yesterday[cur]
 
         abs_change = today_val - yest_val
-        pct_change = (
-            (abs_change / abs(yest_val)) * 100 if yest_val != 0 else 0.0
-        )
+        
+        # Note: Pct change of a zero-centered log return is volatile, but kept for spreadsheet compatibility
+        pct_change = ((abs_change / abs(yest_val)) * 100 if yest_val != 0 else 0.0)
 
         report_data.append({
             "Currency": cur,
@@ -157,111 +129,87 @@ def process_timeframe_metrics(close_df, label):
         })
 
     report_df = pd.DataFrame(report_data)
+    
+    # Filter and sort
     target_currencies = ["USD", "EUR", "GBP", "JPY"]
     report_df = report_df[report_df["Currency"].isin(target_currencies)]
-    report_df = report_df.sort_values(
-        by="Today", ascending=False
-    ).reset_index(drop=True)
+    report_df = report_df.sort_values(by="Today", ascending=False).reset_index(drop=True)
 
     print("\n" + "=" * 80)
-    print(
-        f"               {label.upper()} FOREX CURRENCY STRENGTH & MOMENTUM"
-        " REPORT"
-    )
-    print(
-        f"               Run time: {close_df.index[-1].strftime('%Y-%m-%d')}"
-        " 08:00 AM"
-    )
+    print(f"               {label.upper()} FOREX CURRENCY STRENGTH & MOMENTUM REPORT")
     print("=" * 80)
-    print(
-        f"{'Currency':<10} | {'Today':<12} | {'Yesterday':<12} |"
-        f" {'Point Change':<15} | {'% Change':<12}"
-    )
+    print(f"{'Currency':<10} | {'Today':<12} | {'Yesterday':<12} | {'Point Change':<15} | {'% Change':<12}")
     print("-" * 80)
 
     for _, row in report_df.iterrows():
-        print(
-            f"{row['Currency']:<10} | "
-            f"{row['Today']:+11.3f}% | "
-            f"{row['Yesterday']:+11.3f}% | "
-            f"{row['Abs Change']:+14.3f}% | "
-            f"{row['Pct Change']:+11.2f}%"
-        )
+        print(f"{row['Currency']:<10} | {row['Today']:+11.3f}% | {row['Yesterday']:+11.3f}% | {row['Abs Change']:+14.3f}% | {row['Pct Change']:+11.2f}%")
     print("=" * 80)
 
+    # Re-map row data for Google Sheets update
     report_df["Rank"] = range(1, len(report_df) + 1)
-
-    metrics_by_currency = {}
-    for _, row in report_df.iterrows():
-        metrics_by_currency[row["Currency"]] = [
+    metrics_by_currency = {
+        row["Currency"]: [
             int(row["Rank"]),
             round(float(row["Today"]), 4),
             round(float(row["Yesterday"]), 4),
             round(float(row["Abs Change"]), 4),
             round(float(row["Pct Change"]), 2),
         ]
+        for _, row in report_df.iterrows()
+    }
 
+    # Order rows exactly as Google Sheet expects them: USD, EUR, GBP, JPY
     sheet_currencies = ["USD", "EUR", "GBP", "JPY"]
     rows_to_update = [metrics_by_currency[cur] for cur in sheet_currencies]
 
     return rows_to_update
 
 
+def update_with_retry(worksheet, range_name, values, max_attempts=10):
+    """Updates Google Sheets with exponential backoff retry logic for 429 API errors."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            worksheet.update(range_name=range_name, values=values)
+            return  # Success, exit the loop
+        except Exception as e:
+            # If we hit a 429 error and haven't exhausted attempts, sleep and retry
+            if "429" in str(e) and attempt < max_attempts:
+                sleep_time = 2 ** attempt  # Exponential backoff (2s, 4s, 8s, 16s...)
+                print(f"[Warning] API Rate limit (429) exceeded for {range_name}. Retrying in {sleep_time} seconds (Attempt {attempt}/{max_attempts})...")
+                time.sleep(sleep_time)
+            else:
+                # Reraise the exception if it's not a 429 or if we've exhausted our max attempts
+                raise e
+
+
 def generate_daily_report():
     usd_tickers = [
-        "EURUSD=X",
-        "GBPUSD=X",
-        "AUDUSD=X",
-        "NZDUSD=X",
-        "USDCAD=X",
-        "USDCHF=X",
-        "USDJPY=X",
+        "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X",
+        "USDCAD=X", "USDCHF=X", "USDJPY=X"
     ]
 
-    daily_close_df = fetch_and_clean_data(
-        usd_tickers, period="10d", interval="1d", label="Daily"
-    )
-    daily_rows = process_timeframe_metrics(daily_close_df, label="Daily")
-
-    weekly_close_df = fetch_and_clean_data(
-        usd_tickers, period="3mo", interval="1wk", label="Weekly"
-    )
-    weekly_rows = process_timeframe_metrics(weekly_close_df, label="Weekly")
-
-    monthly_close_df = fetch_and_clean_data(
-        usd_tickers, period="1y", interval="1mo", label="Monthly"
-    )
-    monthly_rows = process_timeframe_metrics(monthly_close_df, label="Monthly")
+    # Fetch a ~3-month pool of daily data ONCE (faster and fixes timeframe asymmetry)
+    daily_close_df = fetch_and_clean_data(usd_tickers, period="3mo")
+    
+    # Lookbacks reflect standard trading days: Daily(1), Weekly(5), Monthly(21)
+    daily_rows = process_timeframe_metrics(daily_close_df, lookback=1, label="Daily")
+    weekly_rows = process_timeframe_metrics(daily_close_df, lookback=5, label="Weekly")
+    monthly_rows = process_timeframe_metrics(daily_close_df, lookback=21, label="Monthly")
 
     # Authenticate via helper function
     gc = get_gspread_client()
-
     spreadsheet_id = "1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU"
     sh = gc.open_by_key(spreadsheet_id)
-
-    # Uses the first sheet in the spreadsheet
     worksheet = sh.sheet1
 
-    # Update Daily range L38:P41
-    worksheet.update(range_name="L38:P41", values=daily_rows)
-    print(
-        "\nSuccessfully updated Daily Currency Ranks & Metrics in Google"
-        " Spreadsheet (cells L38:P41)."
-    )
+    update_with_retry(worksheet, range_name="L38:P41", values=daily_rows)
+    print("\nSuccessfully updated Daily Currency Ranks & Metrics in Google Spreadsheet (cells L38:P41).")
 
-    # Update Weekly range R38:V41
-    worksheet.update(range_name="R38:V41", values=weekly_rows)
-    print(
-        "Successfully updated Weekly Currency Ranks & Metrics in Google"
-        " Spreadsheet (cells R38:V41)."
-    )
+    update_with_retry(worksheet, range_name="R38:V41", values=weekly_rows)
+    print("Successfully updated Weekly Currency Ranks & Metrics in Google Spreadsheet (cells R38:V41).")
 
-    # Update Monthly range X38:AB41
-    worksheet.update(range_name="X38:AB41", values=monthly_rows)
-    print(
-        "Successfully updated Monthly Currency Ranks & Metrics in Google"
-        " Spreadsheet (cells X38:AB41)."
-    )
+    update_with_retry(worksheet, range_name="X38:AB41", values=monthly_rows)
+    print("Successfully updated Monthly Currency Ranks & Metrics in Google Spreadsheet (cells X38:AB41).")
 
 
 if __name__ == "__main__":
