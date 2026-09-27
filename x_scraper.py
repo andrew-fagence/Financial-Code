@@ -1,6 +1,7 @@
 import os
 import json
 import datetime
+import zoneinfo
 import requests
 import gspread
 import time
@@ -47,6 +48,8 @@ def update_discord_news_sheet():
         # Format the timestamp nicely
         try:
             dt = datetime.datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            # Dynamically convert to UK time (handles both GMT and BST automatically)
+            dt = dt.astimezone(zoneinfo.ZoneInfo("Europe/London"))
             formatted_time = dt.strftime("%Y-%m-%d %H:%M")
         except ValueError:
             formatted_time = timestamp_str
