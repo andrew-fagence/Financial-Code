@@ -2,9 +2,8 @@ name: All Fundamental Data Automation
 
 on:
   schedule:
-    - cron: '0 0 * * *' # USA Time
-    - cron: '0 6 * * *' # JPN Time
-    - cron: '0 8 * * *' # EU & UK Time
+    # Runs automatically at 00:00 (midnight) UTC every day
+    - cron: '0 0 * * *'
   workflow_dispatch:
     # Allows you to manually trigger the workflow from the 'Actions' tab
 
@@ -12,8 +11,7 @@ jobs:
   run-data-script:
     name: Automate EU Fundamental Data
     runs-on: ubuntu-latest
-    # Ensures EU data only runs on manual trigger OR at 08:00 UTC
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 8 * * *'
+    # 1st to run
     
     steps:
       - name: Checkout repository
@@ -40,8 +38,9 @@ jobs:
   run-jpn-data-script:
     name: JPN Fundamental Data Automation
     runs-on: ubuntu-latest
-    # Ensures JPN data only runs on manual trigger OR at 06:00 UTC
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
+    needs: run-data-script # Waits for the EU script to finish
+    # 2nd to run. 'always() && !cancelled()' ensures this job still runs even if EU fails
+    if: always() && !cancelled()
     
     steps:
       - name: Checkout repository
@@ -70,8 +69,9 @@ jobs:
   update-uk-data:
     name: UK Fundamental Data Updater
     runs-on: ubuntu-latest
-    # Ensures UK data only runs on manual trigger OR at 08:00 UTC
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 8 * * *'
+    needs: run-jpn-data-script # Waits for the JPN script to finish
+    # 3rd to run. 'always() && !cancelled()' ensures this job still runs even if JPN fails
+    if: always() && !cancelled()
     
     steps:
       # 1. Check out the repository code
@@ -103,8 +103,9 @@ jobs:
   run-automation:
     name: USA Fundamental Data Automation
     runs-on: ubuntu-latest
-    # Ensures USA data only runs on manual trigger OR at 00:00 UTC
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 0 * * *'
+    needs: update-uk-data # Waits for the UK script to finish
+    # 4th to run. 'always() && !cancelled()' ensures this job still runs even if UK fails
+    if: always() && !cancelled()
     
     steps:
       - name: Checkout repository
