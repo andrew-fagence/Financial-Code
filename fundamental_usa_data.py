@@ -13,7 +13,7 @@ import fredapi as fa
 # =========================
 os.environ["CHROME_PATH"] = "/usr/bin/google-chrome"
 FRED_API_KEY = '2d406210f6235b1e9f9e750365bcc8b4'
-SHEET_TAB_NAME = 'Historical Values Storage'
+SHEET_TAB_NAME = 'Sheet1'
 
 # Global placeholders
 fred = None
