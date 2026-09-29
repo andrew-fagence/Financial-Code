@@ -26,8 +26,8 @@ sheet_id = "1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU"
 sheet = client.open_by_key(sheet_id)
 
 # Connect explicitly to the requested Historical Values Storage sheet
-wb = sheet.worksheet("Historical Values Storage")
-print("Connected to 'Historical Values Storage' sheet successfully.")
+wb = sheet.worksheet("Sheet1")
+print("Connected to 'Sheet1' sheet successfully.")
 
 # FRED API Setup
 fred = fa.Fred('2d406210f6235b1e9f9e750365bcc8b4')
