@@ -41,7 +41,7 @@ sheet_id = "1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU"
 sheet = client.open_by_key(sheet_id)
 
 # Target the specific tab for the data
-wb = sheet.worksheet("Historical Values Storage")
+wb = sheet.worksheet("Sheet1")
 print("Successfully connected to 'Historical Values Storage' tab.\n")
 
 # Google Sheets API Rate Limit Helper
