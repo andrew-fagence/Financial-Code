@@ -42,7 +42,7 @@ sheet = client.open_by_key(sheet_id)
 
 # Target the specific tab for the data
 wb = sheet.worksheet("Sheet1")
-print("Successfully connected to 'Historical Values Storage' tab.\n")
+print("Successfully connected to 'Sheet1' tab.\n")
 
 # Google Sheets API Rate Limit Helper
 def api_retry(func, *args, **kwargs):
