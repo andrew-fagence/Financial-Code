@@ -5,6 +5,7 @@ import zoneinfo
 import requests
 import gspread
 import time
+import sys
 from oauth2client.service_account import ServiceAccountCredentials
 
 # Config
@@ -92,23 +93,25 @@ def update_discord_news_sheet():
                 print("Clearing old data and writing new records...")
                 worksheet.clear()
                 
-                # Write values in bulk
-                worksheet.update(range_name='A1', values=rows_to_write)
+                # Write values in bulk ('RAW' ignores Discord commands starting with '=' or '-' to prevent Formula parse errors)
+                worksheet.update(range_name='A1', values=rows_to_write, value_input_option='RAW')
 
                 print("DiscordNews sheet updated successfully.")
                 break  # Exit loop if successful
 
             except Exception as e:
-                # If we encounter the "429: Quota exceeded" error and haven't hit the attempt limit yet
-                if "429" in str(e) and attempt < max_attempts:
-                    print(f"API Error 429: Quota exceeded. Retrying ({attempt}/{max_attempts}) in 60 seconds...")
-                    time.sleep(60)
+                # Catch all transient API errors to prevent silent blank sheets
+                if attempt < max_attempts:
+                    print(f"API Error encountered: {e}. Retrying ({attempt}/{max_attempts}) in 15 seconds...")
+                    time.sleep(15) # Reduced to 15s to prevent concurrent overlaps with next 5-min cron job
                 else:
-                    # Let the outer try-except handle other errors or final failure limit
+                    # Let the outer try-except handle final failure limit
                     raise e
 
     except Exception as e:
         print(f"Failed to write to Google Sheet: {e}")
+        # Ensure GitHub Actions natively marks the run as a failure instead of passing it as a success
+        sys.exit(1)
 
 if __name__ == "__main__":
     update_discord_news_sheet()
