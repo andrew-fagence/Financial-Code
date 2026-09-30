@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import copy
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -72,7 +73,8 @@ print(f"Sending {len(updates)} dynamic updates to Google Sheets...")
 max_attempts = 10
 for attempt in range(1, max_attempts + 1):
     try:
-        worksheet.batch_update(updates)
+        # Pass a deep copy of updates so that gspread doesn't permanently mutate the range strings on retries
+        worksheet.batch_update(copy.deepcopy(updates))
         print("✅ Google Spreadsheet successfully updated with live data!")
         break
     except Exception as e:
