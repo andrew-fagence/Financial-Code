@@ -74,7 +74,7 @@ def get_ai_summary(client: genai.Client, bank_name: str, rate: float, outlook_co
     for attempt in range(10):
         try:
             response = client.models.generate_content(
-                model='gemini-3.5-flash',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
             return response.text.strip()
