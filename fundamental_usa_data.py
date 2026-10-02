@@ -310,7 +310,7 @@ if __name__ == "__main__":
     sheet = client.open_by_key(sheet_id)
     wb = sheet.worksheet(SHEET_TAB_NAME)
     
-    wb.resize(rows=150, cols=50)
+    wb.resize(rows=1000, cols=150)
     # ==========================================
 
     # -------------------------------------------------------------------------
