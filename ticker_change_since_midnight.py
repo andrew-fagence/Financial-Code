@@ -33,7 +33,17 @@ const configs = [
     { symbol: 'TVC:USOIL', row: 66 },
     { symbol: 'OANDA:XAUUSD', row: 67 },
     { symbol: 'OANDA:XAGUSD', row: 68 },
-    { symbol: 'CRYPTO:BTCUSD', row: 69 }
+    { symbol: 'CRYPTO:BTCUSD', row: 69 },
+    { symbol: 'TVC:US30Y', row: 70 },
+    { symbol: 'TVC:EU02Y', row: 71 },
+    { symbol: 'TVC:EU10Y', row: 72 },
+    { symbol: 'TVC:EU30Y', row: 73 },
+    { symbol: 'TVC:GB02Y', row: 74 },
+    { symbol: 'TVC:GB10Y', row: 75 },
+    { symbol: 'TVC:GB30Y', row: 76 },
+    { symbol: 'TVC:JP02Y', row: 77 },
+    { symbol: 'TVC:JP10Y', row: 78 },
+    { symbol: 'TVC:JP30Y', row: 79 }
 ];
 
 // =====================================================
