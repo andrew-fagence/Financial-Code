@@ -1,0 +1,29 @@
+name: Discord Scraper Automation
+
+on:
+  workflow_dispatch: # Allows manual UI runs
+  repository_dispatch: # Allows external, instant API triggers
+    types: [run-discord-scraper]
+
+jobs:
+  run-discord-scraper:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install repository requirements
+        run: pip install -r requirements.txt
+
+      - name: Run Discord Scraper
+        env:
+          # Pulls secrets into the environment safely for the Discord scraper
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: python x_scraper.py
