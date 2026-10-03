@@ -1,5 +1,7 @@
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
@@ -30,6 +32,13 @@ print("Row headings:", values_list)
 # Setup FRED API
 fred = fa.Fred('2d406210f6235b1e9f9e750365bcc8b4')
 
+# Establish a session with automatic retries for robust HTTP requests
+session = requests.Session()
+retry = Retry(connect=5, read=5, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
+
 # Retry wrapper to prevent 429 Rate Limit Errors
 def update_cell_with_retry(row, col, value, max_retries=6):
     for attempt in range(max_retries):
@@ -53,7 +62,7 @@ print("\n--- Fetching Core HICP (EU) ---")
 
 URL = "https://data-api.ecb.europa.eu/service/data/HICP/M.U2.N.XEF000.4D0.INX"
 params = {"format": "jsondata"}
-r = requests.get(URL, params=params)
+r = session.get(URL, params=params)
 print("Status:", r.status_code)
 r.raise_for_status()
 data = r.json()
@@ -113,7 +122,7 @@ for i in range(len(latest)):
 
 # Yearly Change
 URL = "https://data-api.ecb.europa.eu/service/data/HICP/M.U2.N.XEF000.4D0.ANR"
-r = requests.get(URL, params=params)
+r = session.get(URL, params=params)
 r.raise_for_status()
 data = r.json()
 
@@ -153,7 +162,7 @@ for i in range(len(latest)):
 print("\n--- Fetching Headline HICP (EU) ---")
 
 URL = "https://data-api.ecb.europa.eu/service/data/HICP/M.U2.N.000000.4D0.INX"
-r = requests.get(URL, params=params)
+r = session.get(URL, params=params)
 print("Status:", r.status_code)
 r.raise_for_status()
 data = r.json()
@@ -212,7 +221,7 @@ for i in range(len(latest)):
 
 # Yearly
 URL = "https://data-api.ecb.europa.eu/service/data/HICP/M.U2.N.000000.4D0.ANR"
-r = requests.get(URL, params=params)
+r = session.get(URL, params=params)
 r.raise_for_status()
 data = r.json()
 
@@ -261,7 +270,7 @@ def get_ppi(unit):
         "s_adj": "NSA",
         "unit": unit
     }
-    r = requests.get(URL, params=params, timeout=30)
+    r = session.get(URL, params=params, timeout=30)
     r.raise_for_status()
     data = r.json()
     values = data["value"]
@@ -330,7 +339,7 @@ def get_ppi_core(unit):
         "s_adj": "NSA",
         "unit": unit
     }
-    r = requests.get(URL, params=params, timeout=30)
+    r = session.get(URL, params=params, timeout=30)
     r.raise_for_status()
     data = r.json()
     values = data["value"]
@@ -399,7 +408,7 @@ params = {
     "unit": "CLV10_MEUR",
     "s_adj": "SCA"
 }
-r = requests.get(URL, params=params)
+r = session.get(URL, params=params)
 print("Status:", r.status_code)
 r.raise_for_status()
 data = r.json()
@@ -470,7 +479,7 @@ def get_retail(unit, adjustment):
         "s_adj": adjustment,
         "unit": unit
     }
-    r = requests.get(URL, params=params, timeout=30)
+    r = session.get(URL, params=params, timeout=30)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -541,7 +550,7 @@ params = {
     "s_adj": "SCA",
     "unit": "PCH_PRE"
 }
-r = requests.get(URL, params=params, timeout=60)
+r = session.get(URL, params=params, timeout=60)
 print(r.url)
 print("Status:", r.status_code)
 
@@ -587,7 +596,7 @@ def get_industrial_production():
         "s_adj": "SCA",
         "unit": "PCH_PRE"
     }
-    r = requests.get(URL, params=params, timeout=30)
+    r = session.get(URL, params=params, timeout=30)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -633,7 +642,7 @@ def get_industrial():
         "s_adj": "SCA",
         "unit": "PCH_PRE"
     }
-    r = requests.get(URL, params=params, timeout=60)
+    r = session.get(URL, params=params, timeout=60)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -749,7 +758,7 @@ def get_employment(unit):
         "s_adj": "SCA",
         "unit": unit
     }
-    r = requests.get(URL, params=params, timeout=60)
+    r = session.get(URL, params=params, timeout=60)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -817,7 +826,7 @@ def get_unemployment():
         "age": "TOTAL",
         "unit": "PC_ACT"
     }
-    r = requests.get(URL, params=params, timeout=60)
+    r = session.get(URL, params=params, timeout=60)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -888,7 +897,7 @@ def get_participation():
         "citizen": "TOTAL",
         "unit": "PC"
     }
-    r = requests.get(URL, params=params, timeout=60)
+    r = session.get(URL, params=params, timeout=60)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -953,7 +962,7 @@ def get_wages(unit):
         "lcstruct": "D11",
         "unit": unit
     }
-    r = requests.get(URL, params=params, timeout=60)
+    r = session.get(URL, params=params, timeout=60)
     print(r.url)
     r.raise_for_status()
     data = r.json()
@@ -1020,7 +1029,7 @@ def get_vacancy_rate():
         "sizeclas": "TOTAL",
         "indic_em": "JVR"
     }
-    r = requests.get(URL, params=params, timeout=60)
+    r = session.get(URL, params=params, timeout=60)
     print(r.url)
     r.raise_for_status()
     data = r.json()
