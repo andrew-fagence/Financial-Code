@@ -1,4 +1,7 @@
+import copy
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 from io import BytesIO, StringIO
 import re
@@ -17,6 +20,13 @@ warnings.filterwarnings('ignore')
 ssl._create_default_https_context = ssl._create_unverified_context
 
 print("Starting fundamental_jpn_data.py...")
+
+# Establish a session with automatic retries for robust HTTP requests
+session = requests.Session()
+retry = Retry(connect=5, read=5, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
 
 # Global headers to prevent 403 Forbidden WAF blocks
 HEADERS = {
@@ -49,7 +59,8 @@ def api_retry(func, *args, **kwargs):
     max_attempts = 7
     for attempt in range(max_attempts):
         try:
-            return func(*args, **kwargs)
+            # Copy data deeply so batch_update does not ruin retries by appending worksheet titles repeatedly
+            return func(*copy.deepcopy(args), **copy.deepcopy(kwargs))
         except gspread.exceptions.APIError as e:
             if "429" in str(e) and attempt < max_attempts - 1:
                 sleep_time = 2 ** attempt
@@ -75,7 +86,7 @@ URL = (
     f"&lang=E"
 )
 
-r = requests.get(URL, headers=HEADERS, timeout=60)
+r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 data = r.json()
 
@@ -163,7 +174,7 @@ URL = (
     f"&lang=E"
 )
 
-r = requests.get(URL, headers=HEADERS, timeout=60)
+r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 data = r.json()
 
@@ -249,7 +260,7 @@ URL = (
     "&code=PRCG20_2200000000"
 )
 
-r = requests.get(URL, headers=HEADERS, timeout=60)
+r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 
 data = r.json()
@@ -321,7 +332,7 @@ Q = "https://www.esri.cao.go.jp/jp/sna/data/data_list/sokuhou/files/2026/qe262/t
 
 def read_gdp(url):
     return pd.read_csv(
-        BytesIO(requests.get(url, headers=HEADERS, timeout=60).content),
+        BytesIO(session.get(url, headers=HEADERS, timeout=60).content),
         header=None,
         encoding="cp932"
     ).iloc[7:, [0, 1]]
@@ -385,7 +396,7 @@ print("\nJapan Real GDP updated successfully")
 #     target_id = "0003348239" 
 #     
 #     data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
-#     r = requests.get(data_url, headers=HEADERS, timeout=60)
+#     r = session.get(data_url, headers=HEADERS, timeout=60)
 #     r.raise_for_status()
 #     data = r.json()
 #     
@@ -629,7 +640,7 @@ URL = (
     "?statInfId=000040172363&fileKind=0"
 )
 
-r = requests.get(URL, headers=HEADERS, timeout=60)
+r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 b_ind = BytesIO(r.content)
 
@@ -752,7 +763,7 @@ URL = (
     "?statInfId=000031831358&fileKind=0"
 )
 
-r = requests.get(URL, headers=HEADERS, timeout=60)
+r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 
 raw = pd.read_excel(BytesIO(r.content), sheet_name="季節調整値", header=None)
@@ -892,7 +903,7 @@ print("\nJapan Unemployment Rate updated successfully")
 #     subprocess.check_call([sys.executable, "-m", "pip", "install", "html5lib"])
 # 
 # URL = "https://ecitizen.jp/statdb/StatsData/0003005865"
-# html = requests.get(URL, headers=HEADERS, timeout=60).text
+# html = session.get(URL, headers=HEADERS, timeout=60).text
 # tables = pd.read_html(StringIO(html))
 # t = max(tables, key=lambda x: x.shape[0])
 # t.columns = [str(c).strip() for c in t.columns]
@@ -951,7 +962,7 @@ HRS = "https://www.jil.go.jp/english/estatis/eshuyo/e0401.html"
 months_map = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
 
 def load(url, word):
-    t = next(x for x in pd.read_html(StringIO(requests.get(url, headers=HEADERS, timeout=60).text)) if word in x.to_string())
+    t = next(x for x in pd.read_html(StringIO(session.get(url, headers=HEADERS, timeout=60).text)) if word in x.to_string())
     rows = []
     year = None
     for _, r in t.iterrows():
@@ -1001,7 +1012,7 @@ print("\nJapan Average Hourly Earnings updated successfully")
 # JAPAN INITIAL JOBLESS CLAIMS PROXY
 # =============================================================================
 URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040460962&fileKind=0"
-r = requests.get(URL, headers=HEADERS, timeout=60)
+r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 raw = pd.read_excel(BytesIO(r.content), header=None)
 
@@ -1050,7 +1061,7 @@ print("\nJapan Initial Jobless Claims proxy updated successfully")
 # JAPAN JOB OPENINGS
 # =============================================================================
 # URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040478164&fileKind=0"
-# r = requests.get(URL, headers=HEADERS, timeout=60)
+# r = session.get(URL, headers=HEADERS, timeout=60)
 # r.raise_for_status()
 # raw = pd.read_excel(BytesIO(r.content), header=None)
 # 
