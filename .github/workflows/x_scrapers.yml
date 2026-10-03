@@ -1,9 +1,6 @@
 name: Continuous X Scrapers Run
 
 on:
-  schedule:
-    # Retain this as a fallback (GitHub will run it on its own best-effort schedule)
-    - cron: '*/5 * * * *'
   workflow_dispatch: # Allows manual UI runs
   repository_dispatch: # Allows external, instant API triggers
     types: [run-x-scrapers]
@@ -66,13 +63,6 @@ jobs:
           else
             echo "No PLAYWRIGHT_COOKIES secret found; falling back to automated auth."
           fi
-
-      - name: Run FinancialJuice Scraper
-        env:
-          # Pulls secrets into the environment safely
-          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-        run: python x_scraper.py
 
       - name: Run News Scroller Scraper
         env:
