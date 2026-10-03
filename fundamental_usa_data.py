@@ -48,6 +48,18 @@ def safe_update_cell(row, col, val):
     print(f"Failed to update cell {row}, {col} after {max_retries} retries.")
 
 
+def get_fred_series_with_retry(fred_client, ticker, max_retries=6):
+    for attempt in range(max_retries):
+        try:
+            return fred_client.get_series(ticker)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = 5 * (2 ** attempt)
+                print(f"FRED API error for {ticker}: {e}. Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise e
+
 # =========================
 # SYSTEM SETUP (Colab/Linux)
 # =========================
@@ -310,7 +322,20 @@ if __name__ == "__main__":
     sheet = client.open_by_key(sheet_id)
     wb = sheet.worksheet(SHEET_TAB_NAME)
     
-    wb.resize(rows=1000, cols=150)
+    def resize_with_retry(worksheet, rows, cols, max_retries=8):
+        for attempt in range(max_retries):
+            try:
+                worksheet.resize(rows=rows, cols=cols)
+                return
+            except Exception as e:
+                if '429' in str(e) and attempt < max_retries - 1:
+                    sleep_time = 10 * (1.5 ** attempt)
+                    print(f"API 429 Quota Exceeded on resize. Sleeping {sleep_time:.1f}s before retrying...")
+                    time.sleep(sleep_time)
+                else:
+                    raise e
+                    
+    resize_with_retry(wb, 1000, 150)
     # ==========================================
 
     # -------------------------------------------------------------------------
@@ -330,7 +355,7 @@ if __name__ == "__main__":
         print(f"\nProcessing {ticker}...")
         
         # Monthly values (Fresh pull)
-        df_m = fred.get_series(ticker).to_frame(name="index").dropna()
+        df_m = get_fred_series_with_retry(fred, ticker).to_frame(name="index").dropna()
         df_m["yoy"] = df_m["index"].pct_change(1, fill_method=None) * 100
         latestm = df_m.tail(3).reset_index()
         latestm.columns = ["date", "index", "yoy"]
@@ -341,7 +366,7 @@ if __name__ == "__main__":
             safe_update_cell(m_row, m_col + (i * 2), mom)
 
         # Quarterly values (Fresh pull)
-        df_q = fred.get_series(ticker).to_frame(name="index").dropna()
+        df_q = get_fred_series_with_retry(fred, ticker).to_frame(name="index").dropna()
         quarter_df = df_q[df_q.index.month.isin([3, 6, 9, 12])].copy()
         quarter_df["quarterly"] = quarter_df["index"].pct_change(fill_method=None) * 100
         quarter_df = quarter_df.dropna()
@@ -354,7 +379,7 @@ if __name__ == "__main__":
             safe_update_cell(q_row, q_col + (i * 2), valueq)
 
         # Yearly values (Fresh pull)
-        df_y = fred.get_series(ticker).to_frame(name="index").dropna()
+        df_y = get_fred_series_with_retry(fred, ticker).to_frame(name="index").dropna()
         df_y["yoy"] = df_y["index"].pct_change(12, fill_method=None) * 100
         df_y = df_y.dropna()
         latest = df_y.tail(3).reset_index()
@@ -367,7 +392,7 @@ if __name__ == "__main__":
 
     # GDP
     print("\nProcessing GDP...")
-    gdp = fred.get_series("GDPC1").dropna().to_frame("level")
+    gdp = get_fred_series_with_retry(fred, "GDPC1").dropna().to_frame("level")
     gdp["qoq"] = gdp["level"].pct_change(fill_method=None) * 100
     gdp["annualised_qoq"] = ((1 + gdp["qoq"] / 100) ** 4 - 1) * 100
     gdp.index = gdp.index + pd.offsets.QuarterEnd(0)
@@ -379,7 +404,7 @@ if __name__ == "__main__":
         safe_update_cell(25, 2 + (i * 2), date)
         safe_update_cell(25, 3 + (i * 2), qoq)
 
-    gdp_y = fred.get_series("GDPC1").to_frame(name="level").dropna().sort_index()
+    gdp_y = get_fred_series_with_retry(fred, "GDPC1").to_frame(name="level").dropna().sort_index()
     gdp_y["yoy"] = gdp_y["level"].pct_change(4) * 100
     gdp_y.index = gdp_y.index + pd.offsets.QuarterEnd(0)
     latest_y = gdp_y.dropna().tail(3)
@@ -391,7 +416,7 @@ if __name__ == "__main__":
 
     # Retail Sales
     print("\nProcessing Retail Sales...")
-    df_m = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
+    df_m = get_fred_series_with_retry(fred, "RSAFS").to_frame(name="level").dropna().sort_index()
     df_m["mom"] = df_m["level"].pct_change(1) * 100
     latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
@@ -401,7 +426,7 @@ if __name__ == "__main__":
         safe_update_cell(20, 8 + (i * 2), date)
         safe_update_cell(20, 9 + (i * 2), mom)
 
-    df_q = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
+    df_q = get_fred_series_with_retry(fred, "RSAFS").to_frame(name="level").dropna().sort_index()
     last_month = df_q.index.max()
     q = df_q.resample("QE").last()
     q = q[q.index <= last_month]
@@ -414,7 +439,7 @@ if __name__ == "__main__":
         safe_update_cell(25, 8 + (i * 2), date)
         safe_update_cell(25, 9 + (i * 2), qoq)
 
-    df_y = fred.get_series("RSAFS").to_frame(name="level").dropna().sort_index()
+    df_y = get_fred_series_with_retry(fred, "RSAFS").to_frame(name="level").dropna().sort_index()
     df_y["yoy"] = df_y["level"].pct_change(12) * 100
     latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
@@ -426,7 +451,7 @@ if __name__ == "__main__":
 
     # AMTMNO
     print("\nProcessing AMTMNO...")
-    df_m = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
+    df_m = get_fred_series_with_retry(fred, "AMTMNO").to_frame(name="level").dropna().sort_index()
     df_m["mom"] = df_m["level"].pct_change(fill_method=None) * 100
     latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
@@ -436,7 +461,7 @@ if __name__ == "__main__":
         safe_update_cell(20, 26 + (i * 2), date)
         safe_update_cell(20, 27 + (i * 2), mom)
 
-    df_q = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
+    df_q = get_fred_series_with_retry(fred, "AMTMNO").to_frame(name="level").dropna().sort_index()
     q = df_q.resample("QE").last()
     q = q[q.index <= df_q.index.max()]
     q["qoq"] = q["level"].pct_change(fill_method=None) * 100
@@ -448,7 +473,7 @@ if __name__ == "__main__":
         safe_update_cell(25, 26 + (i * 2), date)
         safe_update_cell(25, 27 + (i * 2), qoq)
 
-    df_y = fred.get_series("AMTMNO").to_frame(name="level").dropna().sort_index()
+    df_y = get_fred_series_with_retry(fred, "AMTMNO").to_frame(name="level").dropna().sort_index()
     df_y["yoy"] = df_y["level"].pct_change(12) * 100
     latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
@@ -458,7 +483,7 @@ if __name__ == "__main__":
         safe_update_cell(30, 26 + (i * 2), date)
         safe_update_cell(30, 27 + (i * 2), yoy)
 
-    INDSalesGet = fred.get_series('AMTMNO')
+    INDSalesGet = get_fred_series_with_retry(fred, 'AMTMNO')
     INDSales = INDSalesGet.tail()
     safe_update_cell(20, 32, INDSales.index[2].strftime('%Y-%m-%d'))
     safe_update_cell(20, 33, INDSales.iloc[2])
@@ -485,7 +510,7 @@ if __name__ == "__main__":
 
     # INDPRO
     print("\nProcessing INDPRO...")
-    df_m = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
+    df_m = get_fred_series_with_retry(fred, "INDPRO").to_frame(name="level").dropna().sort_index()
     df_m["mom"] = df_m["level"].pct_change(fill_method=None) * 100
     latest = df_m.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "mom"]
@@ -493,7 +518,7 @@ if __name__ == "__main__":
         safe_update_cell(20, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
         safe_update_cell(20, 33 + (i * 2), float(latest.loc[i, "mom"]))
 
-    df_q = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
+    df_q = get_fred_series_with_retry(fred, "INDPRO").to_frame(name="level").dropna().sort_index()
     q = df_q.resample("QE").last()
     q = q[q.index <= df_q.index.max()]
     q["qoq"] = q["level"].pct_change(fill_method=None) * 100
@@ -503,7 +528,7 @@ if __name__ == "__main__":
         safe_update_cell(25, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
         safe_update_cell(25, 33 + (i * 2), float(latest.loc[i, "qoq"]))
 
-    df_y = fred.get_series("INDPRO").to_frame(name="level").dropna().sort_index()
+    df_y = get_fred_series_with_retry(fred, "INDPRO").to_frame(name="level").dropna().sort_index()
     df_y["yoy"] = df_y["level"].pct_change(12, fill_method=None) * 100
     latest = df_y.dropna().tail(3).reset_index()
     latest.columns = ["date", "level", "yoy"]
@@ -511,7 +536,7 @@ if __name__ == "__main__":
         safe_update_cell(30, 32 + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
         safe_update_cell(30, 33 + (i * 2), float(latest.loc[i, "yoy"]))
 
-    INDProdGet = fred.get_series('INDPRO')
+    INDProdGet = get_fred_series_with_retry(fred, 'INDPRO')
     INDProd = INDProdGet.tail()
     safe_update_cell(20, 38, INDProd.index[2].strftime('%Y-%m-%d'))
     safe_update_cell(20, 39, INDProd.iloc[2])
@@ -530,7 +555,7 @@ if __name__ == "__main__":
     
     for ticker, base_col, is_diff in employment_series:
         print(f"\nProcessing {ticker}...")
-        df_m = fred.get_series(ticker).to_frame(name="level").dropna()
+        df_m = get_fred_series_with_retry(fred, ticker).to_frame(name="level").dropna()
         if is_diff:
             df_m["change"] = df_m["level"].diff()
             df_m = df_m.dropna()
@@ -546,7 +571,7 @@ if __name__ == "__main__":
                 safe_update_cell(114, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
                 safe_update_cell(114, (base_col + 1) + (i * 2), latest.loc[i, "level"])
         
-        df_q = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
+        df_q = get_fred_series_with_retry(fred, ticker).to_frame(name="level").dropna().sort_index()
         q = df_q.resample("QE").last().iloc[:-1].dropna()
         if is_diff:
             q["change"] = q["level"].diff()
@@ -563,7 +588,7 @@ if __name__ == "__main__":
                 safe_update_cell(119, base_col + (i * 2), latest.loc[i, "date"].strftime("%Y-%m-%d"))
                 safe_update_cell(119, (base_col + 1) + (i * 2), latest.loc[i, "level"])
 
-        df_y = fred.get_series(ticker).to_frame(name="level").dropna().sort_index()
+        df_y = get_fred_series_with_retry(fred, ticker).to_frame(name="level").dropna().sort_index()
         if is_diff:
             df_y["yoy_change"] = df_y["level"].diff(12)
             df_y = df_y.dropna()
@@ -586,7 +611,7 @@ if __name__ == "__main__":
                             ("ICSA", [30,28,26, 30,28,26, 30,28,26]),
                             ("JTSJOL", [32,34,36, 36,34,32, 36,34,32])]:
         print(f"\nProcessing Extended {ticker}...")
-        VarGet = fred.get_series(ticker)
+        VarGet = get_fred_series_with_retry(fred, ticker)
         
         # Monthly/Raw tail mapping
         if ticker in ["ICSA", "JTSJOL"]:
