@@ -61,6 +61,11 @@ def update_discord_news_sheet():
         print("No messages found to write.")
         return
 
+    # Pad data with empty rows to prevent race conditions during write.
+    # This completely avoids using worksheet.clear() which temporarily blanks the sheet for readers.
+    while len(rows_to_write) < 150:
+        rows_to_write.append(["", "", ""])
+
     # 3. Connect and update Google Sheet using oauth2client
     try:
         print("Authenticating with Google Sheets...")
@@ -90,8 +95,7 @@ def update_discord_news_sheet():
                 except gspread.exceptions.WorksheetNotFound:
                     worksheet = sh.add_worksheet(title="DiscordNews", rows="150", cols="5")
 
-                print("Clearing old data and writing new records...")
-                worksheet.clear()
+                print("Writing new records...")
                 
                 # Write values in bulk ('RAW' ignores Discord commands starting with '=' or '-' to prevent Formula parse errors)
                 worksheet.update(range_name='A1', values=rows_to_write, value_input_option='RAW')
