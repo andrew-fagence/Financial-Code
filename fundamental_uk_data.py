@@ -1,4 +1,6 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 import gspread
 import re
@@ -31,6 +33,13 @@ print("Connected to 'Sheet1' sheet successfully.")
 
 # FRED API Setup
 fred = fa.Fred('2d406210f6235b1e9f9e750365bcc8b4')
+
+# Establish a session with automatic retries for robust HTTP requests
+session = requests.Session()
+retry = Retry(connect=5, read=5, backoff_factor=2, status_forcelist=[429, 500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
 
 
 # ==============================================================================
@@ -83,7 +92,7 @@ print("\nProcessing UK Core CPI...")
 SERIES_ID_CORE = "DKI7"
 URL_CORE_MOM = f"https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/{SERIES_ID_CORE}/mm23/data"
 
-r = requests.get(URL_CORE_MOM, timeout=30)
+r = session.get(URL_CORE_MOM, timeout=30)
 r.raise_for_status()
 data = r.json()
 
@@ -120,7 +129,7 @@ print("Quarterly Core CPI changes updated successfully")
 # Yearly Core CPI
 SERIES_ID_CORE_YOY = "DKO8"
 URL_CORE_YOY = f"https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/{SERIES_ID_CORE_YOY}/mm23/data"
-r = requests.get(URL_CORE_YOY, timeout=30)
+r = session.get(URL_CORE_YOY, timeout=30)
 r.raise_for_status()
 data = r.json()
 rows = []
@@ -144,7 +153,7 @@ print("Last 3 Core CPI YoY observations updated successfully")
 print("\nProcessing UK Headline CPI...")
 SERIES_ID_CPI = "D7BT"
 URL_CPI = f"https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/{SERIES_ID_CPI}/mm23/data"
-r = requests.get(URL_CPI, timeout=30)
+r = session.get(URL_CPI, timeout=30)
 r.raise_for_status()
 data = r.json()
 
@@ -182,7 +191,7 @@ print("UK Headline CPI quarterly updated successfully")
 # Yearly Headline CPI
 SERIES_ID_CPI_YOY = "D7G7"
 URL_CPI_YOY = f"https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/{SERIES_ID_CPI_YOY}/mm23/data"
-r = requests.get(URL_CPI_YOY, timeout=30)
+r = session.get(URL_CPI_YOY, timeout=30)
 r.raise_for_status()
 data = r.json()
 rows = []
@@ -206,7 +215,7 @@ print("UK Headline CPI yearly updated successfully")
 print("\nProcessing UK Headline PPI...")
 SERIES_ID_PPI = "GB7S"
 URL_PPI = f"https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/{SERIES_ID_PPI}/ppi/data"
-r = requests.get(URL_PPI, timeout=30)
+r = session.get(URL_PPI, timeout=30)
 r.raise_for_status()
 data = r.json()
 
@@ -266,7 +275,7 @@ def quarter_to_date(q):
 
 def get_ons_gdp_series(series_id):
     URL = f"https://www.ons.gov.uk/economy/grossdomesticproductgdp/timeseries/{series_id}/ukea/data"
-    r = requests.get(URL, timeout=30)
+    r = session.get(URL, timeout=30)
     r.raise_for_status()
     data = r.json()
     rows = []
@@ -296,7 +305,7 @@ print("UK GDP quarterly and yearly updated successfully")
 print("\nProcessing UK Retail Sales...")
 SERIES_ID_RETAIL = "J5EK"
 URL_RETAIL = f"https://www.ons.gov.uk/businessindustryandtrade/retailindustry/timeseries/{SERIES_ID_RETAIL}/drsi/data"
-r = requests.get(URL_RETAIL, timeout=30)
+r = session.get(URL_RETAIL, timeout=30)
 r.raise_for_status()
 data = r.json()
 
@@ -335,7 +344,7 @@ print("UK Retail Sales updated successfully")
 print("\nProcessing UK Industrial Sales...")
 SERIES_ID_IND_SALES = "JT27"
 URL_IND_SALES = f"https://www.ons.gov.uk/businessindustryandtrade/manufacturingandproductionindustry/timeseries/{SERIES_ID_IND_SALES}/diop/data"
-r = requests.get(URL_IND_SALES, timeout=30)
+r = session.get(URL_IND_SALES, timeout=30)
 r.raise_for_status()
 data = r.json()
 
@@ -385,7 +394,7 @@ print("UK Industrial Sales updated successfully")
 print("\nProcessing UK Industrial Production...")
 SERIES_ID_PROD = "K222"
 URL_PROD = f"https://www.ons.gov.uk/economy/economicoutputandproductivity/output/timeseries/{SERIES_ID_PROD}/data"
-r = requests.get(URL_PROD, timeout=30)
+r = session.get(URL_PROD, timeout=30)
 r.raise_for_status()
 data = r.json()
 
@@ -429,7 +438,7 @@ print("UK Industrial Production updated successfully")
 
 print("\nProcessing UK Payrolled Employees...")
 URL_PAYROLL = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted/current/rtisajul2026.xlsx"
-r = requests.get(URL_PAYROLL, timeout=60)
+r = session.get(URL_PAYROLL, timeout=60)
 r.raise_for_status()
 
 raw_payroll = pd.read_excel(BytesIO(r.content), sheet_name="1. Payrolled employees (UK)", header=None)
@@ -474,7 +483,7 @@ print("UK Payrolled Employees updated successfully.")
 
 print("\nProcessing UK Unemployment Rate...")
 URL_UNEMP = "https://www.ons.gov.uk/generator?format=csv&uri=/employmentandlabourmarket/peoplenotinwork/unemployment/timeseries/mgsx/lms"
-r = requests.get(URL_UNEMP, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = session.get(URL_UNEMP, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
 r.raise_for_status()
 
 raw_unemp = pd.read_csv(StringIO(r.text), header=None)
@@ -517,7 +526,7 @@ print("UK Unemployment Rate updated successfully.")
 
 print("\nProcessing UK Labour Force Participation...")
 URL_LF = "https://www.ons.gov.uk/generator?format=csv&uri=/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/timeseries/lf2h/lms"
-r = requests.get(URL_LF, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = session.get(URL_LF, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
 r.raise_for_status()
 
 raw_lf = pd.read_csv(StringIO(r.text), header=None)
@@ -568,7 +577,7 @@ print("UK Labour Force Participation % changes updated successfully.")
 
 print("\nProcessing UK Average Weekly Earnings...")
 PAGE_EARN = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/averageweeklyearningsearn01/current"
-r = requests.get(PAGE_EARN, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = session.get(PAGE_EARN, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
 r.raise_for_status()
 
 links = re.findall(r'href=["\']([^"\']+\.xls[x]?)["\']', r.text, re.I)
@@ -577,7 +586,7 @@ URL_EARN = next(("https://www.ons.gov.uk" + x if x.startswith("/") else x for x 
 if not URL_EARN:
     print("WARNING: EARN01 XLS not found for the requested criteria.")
 else:
-    r = requests.get(URL_EARN, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+    r = session.get(URL_EARN, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
     r.raise_for_status()
     raw_earn = pd.read_excel(BytesIO(r.content), sheet_name="3. AWE Regular Pay", header=None)
     data_earn = raw_earn.iloc[9:, [0, 1]].copy()
@@ -601,7 +610,7 @@ else:
     def write_row_earn(df, row, value_col):
         values = []
         for _, r_val in df.iterrows():
-            values += [r_val["date"].strftime("%Y-%m-%d"), round(float(r_val[value_col]), 2)]
+            values += [r_val["date"].strftime("%Y-%m-%d"), round(float(r_val[value_col]), 2)])
         start_col = 20
         end_col = start_col + len(values) - 1
         def col_letter(n):
@@ -625,7 +634,7 @@ else:
 
 print("\nProcessing UK Claimant Count & Vacancies...")
 URL_UNEM_XLS = "https://www.ons.gov.uk/file?uri=/employmentandlabourmarket/peoplenotinwork/unemployment/datasets/claimantcountandvacanciesdataset/current/unem.xlsx"
-r = requests.get(URL_UNEM_XLS, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
+r = session.get(URL_UNEM_XLS, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
 r.raise_for_status()
 raw_unem_xls = pd.read_excel(BytesIO(r.content), sheet_name="data", header=None)
 
