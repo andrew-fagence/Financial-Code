@@ -9,10 +9,10 @@ def fetch_duckduckgo_context(region: str) -> str:
     """Fetches live web search results from DuckDuckGo based on the region."""
     # Maps the region to a highly specific search query to get the best live data
     queries = {
-        "USD": "DXY Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
-        "EUR": "EXY Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
-        "GBP": "BXY Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
-        "JPY": "Yen Basket Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments"
+        "USD": "USA Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
+        "EUR": "EU Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
+        "GBP": "UK Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
+        "JPY": "Japan Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments"
     }
     query = queries.get(region, f"{region} current inflation growth labour metrics news")
     
