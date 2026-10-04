@@ -31,32 +31,37 @@ wb = spreadsheet.worksheet(WORKSHEET_NAME)
 # GOOGLE SHEETS RETRY HELPERS
 # ==========================================
 
-def read_cell_with_retry(worksheet, row, col, max_retries=5):
+def read_cell_with_retry(worksheet, row, col, max_retries=10):
     """Reads a cell value with exponential backoff for API limits."""
-    delay = 2
+    delay = 5
     for attempt in range(max_retries):
         try:
-            return worksheet.cell(row, col).value
+            val = worksheet.cell(row, col).value
+            time.sleep(0.5)  # Pace the requests to avoid hitting burst limits
+            return val
         except Exception as e:
             if attempt == max_retries - 1:
                 raise e
             print(f"Read error at row {row}, col {col}: {e}. Retrying in {delay}s...")
             time.sleep(delay)
-            delay *= 2
+            # Cap the max delay to 60 seconds to wait out the per-minute quota
+            delay = min(delay * 2, 60)
 
-def update_cell_with_retry(worksheet, row, col, value, max_retries=5):
+def update_cell_with_retry(worksheet, row, col, value, max_retries=10):
     """Updates a cell value with exponential backoff for API limits."""
-    delay = 2
+    delay = 5
     for attempt in range(max_retries):
         try:
             worksheet.update_cell(row, col, value)
+            time.sleep(0.5)  # Pace the requests to avoid hitting burst limits
             return
         except Exception as e:
             if attempt == max_retries - 1:
                 raise e
             print(f"Write error at row {row}, col {col}: {e}. Retrying in {delay}s...")
             time.sleep(delay)
-            delay *= 2
+            # Cap the max delay to 60 seconds to wait out the per-minute quota
+            delay = min(delay * 2, 60)
 
 # ==========================================
 # FIND THE NEXT ACTIVE FED DECISION MARKET
