@@ -219,43 +219,6 @@ else:
     print("=" * 65)
 
 
-# ===========================
-# Copy odds from previous ===
-# ===========================
-# ==========================================
-# SAVE PREVIOUS ODDS
-# ==========================================
-
-# Rate Hike: B160 -> G160
-previous_rate_hike = read_cell_with_retry(wb, 160, 2)
-
-update_cell_with_retry(
-    wb,
-    160,
-    7,
-    previous_rate_hike
-)
-
-# Rate Hold: C170 -> H170
-previous_rate_hold = read_cell_with_retry(wb, 160, 3)
-
-update_cell_with_retry(
-    wb,
-    160,
-    8,
-    previous_rate_hold
-)
-
-# Rate Cut: D160 -> I160
-previous_rate_cut = read_cell_with_retry(wb, 160, 4)
-
-update_cell_with_retry(
-    wb,
-    160,
-    9,
-    previous_rate_cut
-)
-
 # ==========================================
 # WRITE NEW FED ODDS TO GOOGLE SHEETS
 # ==========================================
@@ -268,7 +231,7 @@ update_cell_with_retry(
     round(rate_hike_odds, 2)
 )
 
-# Rate Hold Odds -> Row 170, Column C
+# Rate Hold Odds -> Row 160, Column C
 update_cell_with_retry(
     wb,
     160,
@@ -430,20 +393,6 @@ else:
     # GOOGLE SHEETS
     # ROW 161 = ECB
     # -----------------------------------------------------
-
-    # Save previous values BEFORE overwriting current values
-
-    previous_rate_hike = read_cell_with_retry(wb, 161, 2)
-    update_cell_with_retry(wb, 161, 7, previous_rate_hike)
-
-    previous_rate_hold = read_cell_with_retry(wb, 161, 3)
-    update_cell_with_retry(wb, 161, 8, previous_rate_hold)
-
-    previous_rate_cut = read_cell_with_retry(wb, 161, 4)
-    update_cell_with_retry(wb, 161, 9, previous_rate_cut)
-
-    # Write new current values
-    # Stored as decimals because the cells are formatted as %
 
     update_cell_with_retry(
         wb,
@@ -613,20 +562,6 @@ else:
     # ROW 162 = BANK OF ENGLAND
     # -----------------------------------------------------
 
-    # Save previous values BEFORE overwriting current values
-
-    previous_rate_hike = read_cell_with_retry(wb, 162, 2)
-    update_cell_with_retry(wb, 162, 7, previous_rate_hike)
-
-    previous_rate_hold = read_cell_with_retry(wb, 162, 3)
-    update_cell_with_retry(wb, 162, 8, previous_rate_hold)
-
-    previous_rate_cut = read_cell_with_retry(wb, 162, 4)
-    update_cell_with_retry(wb, 162, 9, previous_rate_cut)
-
-    # Write new current values
-    # Store as percentage numbers (e.g. 36.50 rather than 0.365)
-
     update_cell_with_retry(
         wb,
         162,
@@ -794,20 +729,6 @@ else:
     # GOOGLE SHEETS
     # ROW 163 = BANK OF JAPAN
     # -----------------------------------------------------
-
-    # Save previous values BEFORE overwriting current values
-
-    previous_rate_hike = read_cell_with_retry(wb, 163, 2)
-    update_cell_with_retry(wb, 163, 7, previous_rate_hike)
-
-    previous_rate_hold = read_cell_with_retry(wb, 163, 3)
-    update_cell_with_retry(wb, 163, 8, previous_rate_hold)
-
-    previous_rate_cut = read_cell_with_retry(wb, 163, 4)
-    update_cell_with_retry(wb, 163, 9, previous_rate_cut)
-
-    # Write new current values
-    # Store as percentage numbers (e.g. 36.50 rather than 0.365)
 
     update_cell_with_retry(
         wb,
