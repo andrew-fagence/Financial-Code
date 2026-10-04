@@ -9,10 +9,10 @@ def fetch_duckduckgo_context(region: str) -> str:
     """Fetches live web search results from DuckDuckGo based on the region."""
     # Maps the region to a highly specific search query to get the best live data
     queries = {
-        "USD": "USA current inflation, growth and labour metrics and economic news",
-        "EUR": "EU current inflation, growth and labour metrics and economic news",
-        "GBP": "UK current inflation, growth and labour metrics and economic news",
-        "JPY": "Japan current inflation, growth and labour metrics and economic news"
+        "USD": "DXY Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
+        "EUR": "EXY Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
+        "GBP": "BXY Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
+        "JPY": "Yen Basket Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments"
     }
     query = queries.get(region, f"{region} current inflation growth labour metrics news")
     
