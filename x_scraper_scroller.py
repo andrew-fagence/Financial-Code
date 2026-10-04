@@ -401,6 +401,9 @@ def update_google_sheet_with_tweets(accounts):
             
             # Remove the "For more on this and other news visit [URL]" section
             content = re.sub(r"\s*For more on this and other news visit.*$", "", content, flags=re.IGNORECASE)
+
+            # Sanitize "Watch:" out of every retrieved tweet
+            content = re.sub(r"Watch:", "", content, flags=re.IGNORECASE)
             
             # Remove volume emojis specifically
             content = re.sub(r"🔊", "", content)
@@ -426,6 +429,12 @@ def update_google_sheet_with_tweets(accounts):
 
             if not content:
                 continue  # Skip if cleaning left the message completely empty
+            
+            # --- DATA FILTERING ---
+            # Rule: only tweets more than 2 words, and less than or equal to 400 words are retrieved
+            word_count = len(content.split())
+            if word_count <= 2 or word_count > 400:
+                continue
             
             # Append a full stop only if the content does not end in a full stop (.), exclamation mark (!), or question mark (?)
             if not content.endswith(('.', '!', '?')):
