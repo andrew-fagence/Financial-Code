@@ -414,6 +414,9 @@ def update_google_sheet_with_tweets(accounts):
             # Remove all URLs (this naturally catches the URLs at the end of the tweet)
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
 
+            # Remove strings matching "co/xxxxxxxxx" with alphanumeric characters of any length
+            content = re.sub(r"co/[a-zA-Z0-9]+", "", content)
+
             # Remove all hashtags
             content = re.sub(r"#\w+", "", content)
 
