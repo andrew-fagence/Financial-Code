@@ -76,8 +76,8 @@ def convert_to_uk_time(date_obj, time_str):
         london_tz = pytz.timezone('Europe/London')
         dt_london = parsed_dt_utc.astimezone(london_tz)
 
-        # 12-hour format with lowercase am/pm, removing leading zero from hour
-        time_uk_formatted = dt_london.strftime('%I:%M %p').lower().lstrip('0')
+        # 24-hour format
+        time_uk_formatted = dt_london.strftime('%H:%M')
         return dt_london.strftime('%Y-%m-%d'), time_uk_formatted
     except Exception:
         return date_obj.strftime("%Y-%m-%d"), time_str
