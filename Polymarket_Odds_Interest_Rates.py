@@ -63,6 +63,26 @@ def update_cell_with_retry(worksheet, row, col, value, max_retries=10):
             # Cap the max delay to 60 seconds to wait out the per-minute quota
             delay = min(delay * 2, 60)
 
+def batch_update_with_retry(worksheet, data, max_retries=10):
+    """Executes a batch update with exponential backoff for API limits."""
+    if not data:
+        return
+    delay = 5
+    for attempt in range(max_retries):
+        try:
+            worksheet.batch_update(data)
+            time.sleep(0.5)
+            return
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise e
+            print(f"Batch write error: {e}. Retrying in {delay}s...")
+            time.sleep(delay)
+            delay = min(delay * 2, 60)
+
+# Initialize a list to hold all of our batch updates
+batch_updates = []
+
 # ==========================================
 # FIND THE NEXT ACTIVE FED DECISION MARKET
 # ==========================================
@@ -219,35 +239,19 @@ else:
     print("=" * 65)
 
 
-# ==========================================
-# WRITE NEW FED ODDS TO GOOGLE SHEETS
-# ==========================================
-
-# Rate Hike Odds -> Row 160, Column B
-update_cell_with_retry(
-    wb,
-    160,
-    2,
-    round(rate_hike_odds, 2)
-)
-
-# Rate Hold Odds -> Row 160, Column C
-update_cell_with_retry(
-    wb,
-    160,
-    3,
-    round(odds_dict.get("No change", 0), 2)
-)
-
-# Rate Cut Odds -> Row 160, Column D
-update_cell_with_retry(
-    wb,
-    160,
-    4,
-    round(rate_cut_odds, 2)
-)
-
-print("Fed Google Sheet updated successfully.")
+    # ==========================================
+    # QUEUE NEW FED ODDS FOR BATCH UPDATE
+    # ==========================================
+    # Row 160: Col B (Hike), Col C (Hold), Col D (Cut)
+    batch_updates.append({
+        "range": "B160:D160",
+        "values": [[
+            round(rate_hike_odds, 2),
+            round(odds_dict.get("No change", 0), 2),
+            round(rate_cut_odds, 2)
+        ]]
+    })
+    print("Fed odds queued for batch update.")
 
 
 # ==========================================
@@ -394,28 +398,15 @@ else:
     # ROW 161 = ECB
     # -----------------------------------------------------
 
-    update_cell_with_retry(
-        wb,
-        161,
-        2,
-        round(rate_hike_odds, 6)
-    )
-
-    update_cell_with_retry(
-        wb,
-        161,
-        3,
-        round(rate_hold_odds, 6)
-    )
-
-    update_cell_with_retry(
-        wb,
-        161,
-        4,
-        round(rate_cut_odds, 6)
-    )
-
-    print("ECB Google Sheet updated successfully.")
+    batch_updates.append({
+        "range": "B161:D161",
+        "values": [[
+            round(rate_hike_odds, 6),
+            round(rate_hold_odds, 6),
+            round(rate_cut_odds, 6)
+        ]]
+    })
+    print("ECB odds queued for batch update.")
 
 
 # ==========================================
@@ -561,29 +552,16 @@ else:
     # GOOGLE SHEETS
     # ROW 162 = BANK OF ENGLAND
     # -----------------------------------------------------
-
-    update_cell_with_retry(
-        wb,
-        162,
-        2,
-        round(rate_hike_odds, 6)
-    )
-
-    update_cell_with_retry(
-        wb,
-        162,
-        3,
-        round(rate_hold_odds, 6)
-    )
-
-    update_cell_with_retry(
-        wb,
-        162,
-        4,
-        round(rate_cut_odds, 6)
-    )
-
-    print("Bank of England Google Sheet updated successfully.")
+    
+    batch_updates.append({
+        "range": "B162:D162",
+        "values": [[
+            round(rate_hike_odds, 6),
+            round(rate_hold_odds, 6),
+            round(rate_cut_odds, 6)
+        ]]
+    })
+    print("Bank of England odds queued for batch update.")
 
 
 # ==========================================
@@ -729,26 +707,24 @@ else:
     # GOOGLE SHEETS
     # ROW 163 = BANK OF JAPAN
     # -----------------------------------------------------
+    
+    batch_updates.append({
+        "range": "B163:D163",
+        "values": [[
+            round(rate_hike_odds, 6),
+            round(rate_hold_odds, 6),
+            round(rate_cut_odds, 6)
+        ]]
+    })
+    print("Bank of Japan odds queued for batch update.")
 
-    update_cell_with_retry(
-        wb,
-        163,
-        2,
-        round(rate_hike_odds, 6)
-    )
 
-    update_cell_with_retry(
-        wb,
-        163,
-        3,
-        round(rate_hold_odds, 6)
-    )
+# ==========================================
+# EXECUTE THE BATCH UPDATE
+# ==========================================
 
-    update_cell_with_retry(
-        wb,
-        163,
-        4,
-        round(rate_cut_odds, 6)
-    )
-
-    print("Bank of Japan Google Sheet updated successfully.")
+if batch_updates:
+    batch_update_with_retry(wb, batch_updates)
+    print("\nAll queued odds have been batch updated to Google Sheets successfully.")
+else:
+    print("\nNo odds were found to update.")
