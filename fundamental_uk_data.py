@@ -9,6 +9,7 @@ import time
 from google.oauth2.service_account import Credentials
 from io import BytesIO, StringIO
 from gspread.exceptions import APIError
+from gspread.utils import rowcol_to_a1  # Added to convert row/col integers to A1 notation
 
 # ==============================================================================
 # 1. SETUP & AUTHENTICATION
@@ -43,45 +44,25 @@ session.mount('https://', adapter)
 
 
 # ==============================================================================
-# WAIT & RETRY HELPER FUNCTIONS
+# BATCH UPDATE HELPER FUNCTIONS
 # ==============================================================================
 
-def safe_update_cell(worksheet, row, col, value):
-    """Updates a cell with a built-in delay and exponential backoff retry on 429 quota errors."""
-    retries = 0
-    while retries < 5:
-        try:
-            worksheet.update_cell(row, col, value)
-            time.sleep(1.2)  # Base delay to prevent hitting the 60 requests/min quota
-            return
-        except APIError as e:
-            if '429' in str(e):
-                wait_time = 15 * (retries + 1)
-                print(f"API rate limit (429) hit. Waiting {wait_time}s before retrying...")
-                time.sleep(wait_time)
-                retries += 1
-            else:
-                raise e
-    raise Exception(f"Failed to update cell after 5 retries. row={row}, col={col}")
+# Global list to accumulate all updates
+batch_updates = []
 
+def safe_update_cell(worksheet, row, col, value):
+    """Queues a single cell update to be executed in a batch."""
+    batch_updates.append({
+        'range': rowcol_to_a1(row, col),
+        'values': [[value]]
+    })
 
 def safe_update(worksheet, range_name, values):
-    """Updates a cell range with a built-in delay and exponential backoff retry on 429 quota errors."""
-    retries = 0
-    while retries < 5:
-        try:
-            worksheet.update(range_name=range_name, values=values)
-            time.sleep(1.2)  # Base delay to prevent hitting the 60 requests/min quota
-            return
-        except APIError as e:
-            if '429' in str(e):
-                wait_time = 15 * (retries + 1)
-                print(f"API rate limit (429) hit. Waiting {wait_time}s before retrying...")
-                time.sleep(wait_time)
-                retries += 1
-            else:
-                raise e
-    raise Exception(f"Failed to update range after 5 retries. range={range_name}")
+    """Queues a range update to be executed in a batch."""
+    batch_updates.append({
+        'range': range_name,
+        'values': values
+    })
 
 
 # ==============================================================================
@@ -610,7 +591,7 @@ else:
     def write_row_earn(df, row, value_col):
         values = []
         for _, r_val in df.iterrows():
-            values += [r_val["date"].strftime("%Y-%m-%d"), round(float(r_val[value_col]), 2)])
+            values += [r_val["date"].strftime("%Y-%m-%d"), round(float(r_val[value_col]), 2)]
         start_col = 20
         end_col = start_col + len(values) - 1
         def col_letter(n):
@@ -698,4 +679,29 @@ write_row_vac(quarterly_vac, 121)
 write_row_vac(yearly_vac, 126)
 print("UK Job Openings / Vacancies % changes written to Google Sheets successfully.")
 
-print("\n--- ALL UK FUNDAMENTAL DATA UPLOADED SUCCESSFULLY ---")
+# ==============================================================================
+# 14. EXECUTE BATCH UPDATE
+# ==============================================================================
+
+print("\n--- ALL UK FUNDAMENTAL DATA PROCESSED ---")
+print(f"Executing {len(batch_updates)} updates to Google Sheets in a single batch request...")
+
+retries = 0
+while retries < 5:
+    try:
+        if batch_updates:
+            wb.batch_update(batch_updates)
+        print("Google Sheets Batch update completed successfully.")
+        break
+    except APIError as e:
+        if '429' in str(e):
+            wait_time = 15 * (retries + 1)
+            print(f"API rate limit (429) hit. Waiting {wait_time}s before retrying...")
+            time.sleep(wait_time)
+            retries += 1
+        else:
+            raise e
+else:
+    raise Exception("Failed to execute Google Sheets batch update after 5 retries.")
+
+print("\n--- DONE ---")
