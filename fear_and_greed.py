@@ -56,13 +56,15 @@ def update_market_data():
         max_attempts = 10
         for attempt in range(1, max_attempts + 1):
             try:
-                # Stock Market updates (Cells E40 & E41)
-                sheet.update_acell('E40', stock_score)
-                sheet.update_acell('E41', stock_sentiment)
-
-                # Crypto updates (Cells E43 & E44)
-                sheet.update_acell('E43', crypto_score)
-                sheet.update_acell('E44', crypto_sentiment)
+                # Single Batch Update for Stock Market & Crypto (1 API Call)
+                updates = [
+                    {'range': 'E40', 'values': [[stock_score]]},
+                    {'range': 'E41', 'values': [[stock_sentiment]]},
+                    {'range': 'E43', 'values': [[crypto_score]]},
+                    {'range': 'E44', 'values': [[crypto_sentiment]]}
+                ]
+                
+                sheet.batch_update(updates)
 
                 print("All data successfully synced to Google Sheets!")
                 break  # Success, exit the retry loop
