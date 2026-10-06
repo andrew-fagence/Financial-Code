@@ -198,7 +198,11 @@ function getActiveCRT(periods) {
 // FINISH CHECK
 // =====================================================
 
+let isWriting = false; // Added to prevent duplicate executions from websockets
+
 async function finish() {
+
+    if (isWriting) return;
 
     for (const s of symbols) {
         for (const tf of Object.keys(timeframes)) {
@@ -206,6 +210,7 @@ async function finish() {
         }
     }
 
+    isWriting = true; // Lock execution
     await writeToSheet();
     client.end();
 }
