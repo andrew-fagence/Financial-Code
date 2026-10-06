@@ -27,6 +27,9 @@ WORKSHEET_NAME = "Sheet1"
 spreadsheet = gc.open_by_key(SPREADSHEET_ID)
 wb = spreadsheet.worksheet(WORKSHEET_NAME)
 
+# List to store all our updates for a single batch API call
+cells_to_update = []
+
 # ==========================================
 # GOOGLE SHEETS RETRY HELPERS
 # ==========================================
@@ -47,18 +50,20 @@ def read_cell_with_retry(worksheet, row, col, max_retries=10):
             # Cap the max delay to 60 seconds to wait out the per-minute quota
             delay = min(delay * 2, 60)
 
-def update_cell_with_retry(worksheet, row, col, value, max_retries=10):
-    """Updates a cell value with exponential backoff for API limits."""
+def batch_update_with_retry(worksheet, cell_list, max_retries=10):
+    """Updates a list of cells in a SINGLE API call with exponential backoff."""
+    if not cell_list:
+        return
     delay = 5
     for attempt in range(max_retries):
         try:
-            worksheet.update_cell(row, col, value)
+            worksheet.update_cells(cell_list)
             time.sleep(0.5)  # Pace the requests to avoid hitting burst limits
             return
         except Exception as e:
             if attempt == max_retries - 1:
                 raise e
-            print(f"Write error at row {row}, col {col}: {e}. Retrying in {delay}s...")
+            print(f"Batch write error: {e}. Retrying in {delay}s...")
             time.sleep(delay)
             # Cap the max delay to 60 seconds to wait out the per-minute quota
             delay = min(delay * 2, 60)
@@ -220,34 +225,19 @@ else:
 
 
 # ==========================================
-# WRITE NEW FED ODDS TO GOOGLE SHEETS (COLUMNS L, M, N)
+# QUEUE NEW FED ODDS TO GOOGLE SHEETS (COLUMNS L, M, N)
 # ==========================================
 
 # Rate Hike Odds -> Row 160, Column L
-update_cell_with_retry(
-    wb,
-    160,
-    12,
-    round(rate_hike_odds, 2)
-)
+cells_to_update.append(gspread.Cell(160, 12, round(rate_hike_odds, 2)))
 
 # Rate Hold Odds -> Row 160, Column M
-update_cell_with_retry(
-    wb,
-    160,
-    13,
-    round(odds_dict.get("No change", 0), 2)
-)
+cells_to_update.append(gspread.Cell(160, 13, round(odds_dict.get("No change", 0), 2)))
 
 # Rate Cut Odds -> Row 160, Column N
-update_cell_with_retry(
-    wb,
-    160,
-    14,
-    round(rate_cut_odds, 2)
-)
+cells_to_update.append(gspread.Cell(160, 14, round(rate_cut_odds, 2)))
 
-print("Fed Google Sheet updated successfully.")
+print("Fed odds queued for batch update.")
 
 
 # ==========================================
@@ -394,28 +384,11 @@ else:
     # ROW 161 = ECB (COLUMNS L, M, N)
     # -----------------------------------------------------
 
-    update_cell_with_retry(
-        wb,
-        161,
-        12,
-        round(rate_hike_odds, 6)
-    )
+    cells_to_update.append(gspread.Cell(161, 12, round(rate_hike_odds, 6)))
+    cells_to_update.append(gspread.Cell(161, 13, round(rate_hold_odds, 6)))
+    cells_to_update.append(gspread.Cell(161, 14, round(rate_cut_odds, 6)))
 
-    update_cell_with_retry(
-        wb,
-        161,
-        13,
-        round(rate_hold_odds, 6)
-    )
-
-    update_cell_with_retry(
-        wb,
-        161,
-        14,
-        round(rate_cut_odds, 6)
-    )
-
-    print("ECB Google Sheet updated successfully.")
+    print("ECB odds queued for batch update.")
 
 
 # ==========================================
@@ -562,28 +535,11 @@ else:
     # ROW 162 = BANK OF ENGLAND (COLUMNS L, M, N)
     # -----------------------------------------------------
 
-    update_cell_with_retry(
-        wb,
-        162,
-        12,
-        round(rate_hike_odds, 6)
-    )
+    cells_to_update.append(gspread.Cell(162, 12, round(rate_hike_odds, 6)))
+    cells_to_update.append(gspread.Cell(162, 13, round(rate_hold_odds, 6)))
+    cells_to_update.append(gspread.Cell(162, 14, round(rate_cut_odds, 6)))
 
-    update_cell_with_retry(
-        wb,
-        162,
-        13,
-        round(rate_hold_odds, 6)
-    )
-
-    update_cell_with_retry(
-        wb,
-        162,
-        14,
-        round(rate_cut_odds, 6)
-    )
-
-    print("Bank of England Google Sheet updated successfully.")
+    print("Bank of England odds queued for batch update.")
 
 
 # ==========================================
@@ -730,25 +686,15 @@ else:
     # ROW 163 = BANK OF JAPAN (COLUMNS L, M, N)
     # -----------------------------------------------------
 
-    update_cell_with_retry(
-        wb,
-        163,
-        12,
-        round(rate_hike_odds, 6)
-    )
+    cells_to_update.append(gspread.Cell(163, 12, round(rate_hike_odds, 6)))
+    cells_to_update.append(gspread.Cell(163, 13, round(rate_hold_odds, 6)))
+    cells_to_update.append(gspread.Cell(163, 14, round(rate_cut_odds, 6)))
 
-    update_cell_with_retry(
-        wb,
-        163,
-        13,
-        round(rate_hold_odds, 6)
-    )
+    print("Bank of Japan odds queued for batch update.")
 
-    update_cell_with_retry(
-        wb,
-        163,
-        14,
-        round(rate_cut_odds, 6)
-    )
-
-    print("Bank of Japan Google Sheet updated successfully.")
+# ==========================================
+# PERFORM A SINGLE BATCH UPDATE FOR ALL QUEUED CELLS
+# ==========================================
+if cells_to_update:
+    batch_update_with_retry(wb, cells_to_update)
+    print("\nSUCCESS: All odds written to Google Sheets in a single batch update!")
