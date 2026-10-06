@@ -45,54 +45,11 @@ const auth = new google.auth.GoogleAuth({
 const spreadsheetId = '1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU';
 
 // =====================================================
-// WRITE TO SHEET
+// BATCH WRITE TO SHEET (1 Single API Call)
 // =====================================================
 
-async function writeToSheet(row, data) {
-    // Explicitly obtain the authenticated client to prevent implicit resolution failures
-    const authClient = await auth.getClient();
-
-    const sheets = google.sheets({
-        version: 'v4',
-        auth: authClient // Pass the resolved client here
-    });
-
-    const maxRetries = 10;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            await sheets.spreadsheets.values.update({
-                spreadsheetId,
-                range: `Sheet1!B${row}:J${row}`,
-                valueInputOption: 'USER_ENTERED',
-                requestBody: {
-                    values: [[
-                        data.pdh,
-                        data.pd50,
-                        data.pdl,
-                        data.pwh,
-                        data.pw50,
-                        data.pwl,
-                        data.dailyTrueOpen,
-                        data.asiaHigh,
-                        data.asiaLow
-                    ]]
-                }
-            });
-
-            console.log(`Google Sheets updated for row ${row}`);
-            return; // Success, exit the loop and function
-        } catch (error) {
-            if (attempt === maxRetries) {
-                console.error(`Failed to update Google Sheets for row ${row} after ${maxRetries} attempts.`, error);
-                throw error;
-            }
-            console.log(`Rate limit or error encountered for row ${row}. Retrying in 5 seconds... (Attempt ${attempt} of ${maxRetries})`);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-    }
-}
-
-async function writeExtraToSheet(row, data) {
+async function batchWriteToSheet(allData, allExtraData) {
+    // Explicitly obtain the authenticated client
     const authClient = await auth.getClient();
 
     const sheets = google.sheets({
@@ -100,29 +57,58 @@ async function writeExtraToSheet(row, data) {
         auth: authClient
     });
 
+    const updateData = [];
+
+    // Format primary data for batch update
+    for (const item of allData) {
+        updateData.push({
+            range: `Sheet1!B${item.row}:J${item.row}`,
+            values: [[
+                item.data.pdh,
+                item.data.pd50,
+                item.data.pdl,
+                item.data.pwh,
+                item.data.pw50,
+                item.data.pwl,
+                item.data.dailyTrueOpen,
+                item.data.asiaHigh,
+                item.data.asiaLow
+            ]]
+        });
+    }
+
+    // Format extra data for batch update
+    for (const item of allExtraData) {
+        updateData.push({
+            range: `Sheet1!P${item.row}:Q${item.row}`,
+            values: [[
+                item.data.prev1mHigh,
+                item.data.recent15mClose
+            ]]
+        });
+    }
+
+    if (updateData.length === 0) return;
+
     const maxRetries = 10;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            await sheets.spreadsheets.values.update({
+            await sheets.spreadsheets.values.batchUpdate({
                 spreadsheetId,
-                range: `Sheet1!P${row}:Q${row}`,
-                valueInputOption: 'USER_ENTERED',
                 requestBody: {
-                    values: [[
-                        data.prev1mHigh,
-                        data.recent15mClose
-                    ]]
+                    valueInputOption: 'USER_ENTERED',
+                    data: updateData
                 }
             });
 
-            console.log(`Google Sheets updated extra data for row ${row}`);
+            console.log(`\nGoogle Sheets batch update successful for all rows!`);
             return; // Success, exit the loop and function
         } catch (error) {
             if (attempt === maxRetries) {
-                console.error(`Failed to update Google Sheets extra data for row ${row} after ${maxRetries} attempts.`, error);
+                console.error(`Failed to batch update Google Sheets after ${maxRetries} attempts.`, error);
                 throw error;
             }
-            console.log(`Rate limit or error encountered for extra data row ${row}. Retrying in 5 seconds... (Attempt ${attempt} of ${maxRetries})`);
+            console.log(`Rate limit or error encountered during batch update. Retrying in 5 seconds... (Attempt ${attempt} of ${maxRetries})`);
             await new Promise(resolve => setTimeout(resolve, 5000));
         }
     }
@@ -154,8 +140,7 @@ async function processSymbol(symbol, row) {
 
             if (dailyDone && weeklyDone && nyDone && asiaDone) {
                 finished = true;
-                await writeToSheet(row, data);
-                resolve();
+                resolve({ row, data }); // Return data instead of writing to sheet immediately
             }
         }
 
@@ -274,8 +259,7 @@ async function processExtraSymbol(symbol, row) {
             if (finished) return;
             if (done1m && done15m) {
                 finished = true;
-                await writeExtraToSheet(row, data);
-                resolve();
+                resolve({ row, data }); // Return data instead of writing to sheet immediately
             }
         }
 
@@ -313,15 +297,26 @@ async function processExtraSymbol(symbol, row) {
 // MAIN
 // =====================================================
 (async () => {
-    // 1. Process original symbols
+    const allData = [];
+    const allExtraData = [];
+
+    // 1. Process original symbols and store their results
     for (const config of configs) {
-        await processSymbol(config.symbol, config.row);
+        const result = await processSymbol(config.symbol, config.row);
+        allData.push(result);
     }
     
-    // 2. Process newly requested 1m and 15m extra pairs
+    // 2. Process newly requested 1m and 15m extra pairs and store their results
     for (const config of extraConfigs) {
-        await processExtraSymbol(config.symbol, config.row);
+        const result = await processExtraSymbol(config.symbol, config.row);
+        allExtraData.push(result);
     }
+
+    // 3. Batch Update all Google Sheets data in a single API call
+    console.log('\n================================');
+    console.log('UPDATING GOOGLE SHEETS...');
+    console.log('================================');
+    await batchWriteToSheet(allData, allExtraData);
 
     client.end();
     console.log('\nALL SYMBOLS COMPLETE');
