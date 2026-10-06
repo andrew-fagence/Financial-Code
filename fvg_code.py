@@ -188,7 +188,10 @@ function getActiveFVG(periods) {
 // FINISH CHECK
 // =====================================================
 
+let isFinished = false;
+
 async function finish() {
+    if (isFinished) return; // Prevent multiple executions
 
     for (const s of symbols) {
         for (const tf of Object.keys(timeframes)) {
@@ -196,6 +199,7 @@ async function finish() {
         }
     }
 
+    isFinished = true; // Lock execution so it only batch updates once
     await writeToSheet();
     client.end();
 }
