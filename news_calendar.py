@@ -218,9 +218,40 @@ def update_forex_calendar():
             except gspread.exceptions.WorksheetNotFound:
                 worksheet = sheet.add_worksheet(title=SHEET_TAB_NAME, rows=100, cols=6)
 
-            # Clear old content and update using append_rows (compatible with newest gspread)
-            worksheet.clear()
-            worksheet.append_rows(events)
+            # --- SINGULAR BATCH UPDATE ---
+            # Bundles the "clear sheet" and "write new data" commands into exactly ONE API call.
+            requests = [
+                {
+                    # 1. Clear all existing user-entered values in the sheet
+                    "updateCells": {
+                        "range": {
+                            "sheetId": worksheet.id
+                        },
+                        "fields": "userEnteredValue"
+                    }
+                },
+                {
+                    # 2. Write the new events data row-by-row in the same request payload
+                    "updateCells": {
+                        "rows": [
+                            {
+                                "values": [
+                                    {"userEnteredValue": {"stringValue": str(cell)}} for cell in row
+                                ]
+                            } for row in events
+                        ],
+                        "fields": "userEnteredValue",
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 0,
+                            "startColumnIndex": 0
+                        }
+                    }
+                }
+            ]
+            
+            # Execute the single batched API call
+            sheet.batch_update({"requests": requests})
 
             print("Success! Dashboard spreadsheet has been updated.")
             break  # Exit the retry loop on success
