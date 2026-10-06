@@ -1,8 +1,6 @@
 name: FVG Data Automation
 
 on:
-  schedule:
-    - cron: '0 0 * * *' # Runs every day at Midnight UTC. You can change this to suit your schedule.
   workflow_dispatch: # Allows you to run the action manually from the Actions tab
 
 jobs:
