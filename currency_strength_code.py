@@ -165,17 +165,17 @@ def process_timeframe_metrics(close_df, lookback, label):
     return rows_to_update
 
 
-def update_with_retry(worksheet, range_name, values, max_attempts=10):
-    """Updates Google Sheets with exponential backoff retry logic for 429 API errors."""
+def batch_update_with_retry(worksheet, data, max_attempts=10):
+    """Updates Google Sheets in a single batch with exponential backoff retry logic for 429 API errors."""
     for attempt in range(1, max_attempts + 1):
         try:
-            worksheet.update(range_name=range_name, values=values)
+            worksheet.batch_update(data)
             return  # Success, exit the loop
         except Exception as e:
             # If we hit a 429 error and haven't exhausted attempts, sleep and retry
             if "429" in str(e) and attempt < max_attempts:
                 sleep_time = 2 ** attempt  # Exponential backoff (2s, 4s, 8s, 16s...)
-                print(f"[Warning] API Rate limit (429) exceeded for {range_name}. Retrying in {sleep_time} seconds (Attempt {attempt}/{max_attempts})...")
+                print(f"[Warning] API Rate limit (429) exceeded for batch update. Retrying in {sleep_time} seconds (Attempt {attempt}/{max_attempts})...")
                 time.sleep(sleep_time)
             else:
                 # Reraise the exception if it's not a 429 or if we've exhausted our max attempts
@@ -202,13 +202,18 @@ def generate_daily_report():
     sh = gc.open_by_key(spreadsheet_id)
     worksheet = sh.sheet1
 
-    update_with_retry(worksheet, range_name="L38:P41", values=daily_rows)
+    # Bundle all updates into a single list of dictionaries
+    batch_data = [
+        {'range': 'L38:P41', 'values': daily_rows},
+        {'range': 'R38:V41', 'values': weekly_rows},
+        {'range': 'X38:AB41', 'values': monthly_rows}
+    ]
+
+    # Execute a single API call for all ranges
+    batch_update_with_retry(worksheet, data=batch_data)
+
     print("\nSuccessfully updated Daily Currency Ranks & Metrics in Google Spreadsheet (cells L38:P41).")
-
-    update_with_retry(worksheet, range_name="R38:V41", values=weekly_rows)
     print("Successfully updated Weekly Currency Ranks & Metrics in Google Spreadsheet (cells R38:V41).")
-
-    update_with_retry(worksheet, range_name="X38:AB41", values=monthly_rows)
     print("Successfully updated Monthly Currency Ranks & Metrics in Google Spreadsheet (cells X38:AB41).")
 
 
