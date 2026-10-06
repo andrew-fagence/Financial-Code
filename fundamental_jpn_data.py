@@ -54,6 +54,9 @@ sheet = client.open_by_key(sheet_id)
 wb = sheet.worksheet("Sheet1")
 print("Successfully connected to 'Sheet1' tab.\n")
 
+# Global list to collect all batch update payloads for ONE single API request
+all_batch_updates = []
+
 # Google Sheets API Rate Limit Helper
 def api_retry(func, *args, **kwargs):
     max_attempts = 7
@@ -153,12 +156,12 @@ core_yearly_values = []
 for _, x in yearly.iterrows():
     core_yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "B5:G5", "values": [core_monthly_values]},
     {"range": "B10:G10", "values": [core_quarterly_values]},
     {"range": "B15:G15", "values": [core_yearly_values]}
 ])
-print("\nJapan Core CPI updated successfully")
+print("\nJapan Core CPI prepared for batch update successfully")
 
 
 # =============================================================================
@@ -239,12 +242,12 @@ head_yearly_values = []
 for _, x in yearly.iterrows():
     head_yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "H5:M5", "values": [head_monthly_values]},
     {"range": "H10:M10", "values": [head_quarterly_values]},
     {"range": "H15:M15", "values": [head_yearly_values]}
 ])
-print("\nJapan Headline CPI updated successfully")
+print("\nJapan Headline CPI prepared for batch update successfully")
 
 
 # =============================================================================
@@ -316,12 +319,12 @@ ppi_yearly_values = []
 for _, x in yearly.iterrows():
     ppi_yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "N5:S5", "values": [ppi_monthly_values]},
     {"range": "N10:S10", "values": [ppi_quarterly_values]},
     {"range": "N15:S15", "values": [ppi_yearly_values]}
 ])
-print("\nJapan PPI updated successfully")
+print("\nJapan PPI prepared for batch update successfully")
 
 
 # =============================================================================
@@ -379,11 +382,11 @@ for _, x in yearly.iterrows():
     date = pd.Period(x["quarter"], freq="Q").end_time.strftime("%Y-%m-%d")
     gdp_yearly_values += [date, round(x["yoy"], 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "B28:G28", "values": [gdp_quarterly_values]},
     {"range": "B33:G33", "values": [gdp_yearly_values]}
 ])
-print("\nJapan Real GDP updated successfully")
+print("\nJapan Real GDP prepared for batch update successfully")
 
 
 # =============================================================================
@@ -624,12 +627,12 @@ print("\nJapan Real GDP updated successfully")
 # for _, x in yearly_retail.iterrows():
 #     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 # 
-# api_retry(wb.batch_update, [
+# all_batch_updates.extend([
 #     {"range": "H23:M23", "values": [monthly_values]},
 #     {"range": "H28:M28", "values": [quarterly_values]},
 #     {"range": "H33:M33", "values": [yearly_values]}
 # ])
-# print("\nJapan Retail Sales updated successfully")
+# print("\nJapan Retail Sales prepared for batch update successfully")
 
 
 # =============================================================================
@@ -689,12 +692,12 @@ yearly_values = []
 for _, x in yearly.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "Z23:AE23", "values": [monthly_values]},
     {"range": "Z28:AE28", "values": [quarterly_values]},
     {"range": "Z33:AE33", "values": [yearly_values]}
 ])
-print("\nJapan Industrial Shipments updated successfully")
+print("\nJapan Industrial Shipments prepared for batch update successfully")
 
 
 # =============================================================================
@@ -747,12 +750,12 @@ yearly_values = []
 for _, x in yearly.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "AF23:AK23", "values": [monthly_values]},
     {"range": "AF28:AK28", "values": [quarterly_values]},
     {"range": "AF33:AK33", "values": [yearly_values]}
 ])
-print("\nJapan Industrial Production updated successfully")
+print("\nJapan Industrial Production prepared for batch update successfully")
 
 
 # =============================================================================
@@ -817,12 +820,12 @@ def make_values(data, col):
         out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 1)]
     return out
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "B117:G117", "values": [make_values(monthly, "monthly_change")]},
     {"range": "B122:G122", "values": [make_values(quarterly, "quarterly_change")]},
     {"range": "B127:G127", "values": [make_values(yearly, "yearly_change")]}
 ])
-print("\nJapan NFP updated successfully")
+print("\nJapan NFP prepared for batch update successfully")
 
 
 # =============================================================================
@@ -886,12 +889,12 @@ yearly_values = []
 for _, x in yearly.iterrows():
     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(float(x["unemployment_rate"]), 2)]
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "H117:M117", "values": [monthly_values]},
     {"range": "H122:M122", "values": [quarterly_values]},
     {"range": "H127:M127", "values": [yearly_values]}
 ])
-print("\nJapan Unemployment Rate updated successfully")
+print("\nJapan Unemployment Rate prepared for batch update successfully")
 
 
 # =============================================================================
@@ -946,12 +949,12 @@ print("\nJapan Unemployment Rate updated successfully")
 #         out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 2)]
 #     return out
 # 
-# api_retry(wb.batch_update, [
+# all_batch_updates.extend([
 #     {"range": "N117:S117", "values": [vals(monthly, "lfpr")]},
 #     {"range": "N122:S122", "values": [vals(quarterly, "lfpr")]},
 #     {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
 # ])
-# print("\nJapan Labour Force Participation Rate updated successfully")
+# print("\nJapan Labour Force Participation Rate prepared for batch update successfully")
 
 
 # =============================================================================
@@ -1000,12 +1003,12 @@ yearly = df.dropna(subset=["yearly"]).tail(3)
 def vals_ahe(d, c):
     return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "T117:Y117", "values": [vals_ahe(monthly, "monthly")]},
     {"range": "T122:Y122", "values": [vals_ahe(quarterly, "quarterly")]},
     {"range": "T127:Y127", "values": [vals_ahe(yearly, "yearly")]}
 ])
-print("\nJapan Average Hourly Earnings updated successfully")
+print("\nJapan Average Hourly Earnings prepared for batch update successfully")
 
 
 # =============================================================================
@@ -1049,12 +1052,12 @@ yearly = df.dropna(subset=["yearly"]).tail(3)
 def vals_claims(d, c):
     return sum(([x["date"].strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
 
-api_retry(wb.batch_update, [
+all_batch_updates.extend([
     {"range": "Z117:AE117", "values": [vals_claims(monthly, "monthly")]},
     {"range": "Z122:AE122", "values": [vals_claims(quarterly, "quarterly")]},
     {"range": "Z127:AE127", "values": [vals_claims(yearly, "yearly")]}
 ])
-print("\nJapan Initial Jobless Claims proxy updated successfully")
+print("\nJapan Initial Jobless Claims proxy prepared for batch update successfully")
 
 
 # =============================================================================
@@ -1093,10 +1096,20 @@ print("\nJapan Initial Jobless Claims proxy updated successfully")
 # def vals_openings(d, c):
 #     return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
 # 
-# api_retry(wb.batch_update, [
+# all_batch_updates.extend([
 #     {"range": "AF117:AK117", "values": [vals_openings(monthly, "monthly")]},
 #     {"range": "AF122:AK122", "values": [vals_openings(quarterly, "quarterly")]},
 #     {"range": "AF127:AK127", "values": [vals_openings(yearly, "yearly")]}
 # ])
-# 
-# print("\nJapan Job Openings updated successfully")
+# print("\nJapan Job Openings prepared for batch update successfully")
+
+
+# =============================================================================
+# FINAL GOOGLE SHEETS BATCH UPDATE EXECUTION
+# =============================================================================
+if all_batch_updates:
+    print("\nExecuting a SINGLE batch update to Google Sheets to respect API quotas...")
+    api_retry(wb.batch_update, all_batch_updates)
+    print("SUCCESS: All Japan fundamental data pushed to Google Sheets in 1 request.")
+else:
+    print("\nNo data generated for update.")
