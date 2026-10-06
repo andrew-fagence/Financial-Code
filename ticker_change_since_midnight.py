@@ -58,31 +58,37 @@ const auth = new google.auth.GoogleAuth({
 const spreadsheetId = '1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU';
 
 // =====================================================
-// WRITE TO SHEET
+// BATCH WRITE TO SHEET
 // =====================================================
 
-async function writeToSheet(row, price) {
+async function batchWriteToSheet(data) {
+    if (!data || data.length === 0) {
+        console.log("No data available to update Google Sheets.");
+        return;
+    }
+
     const sheets = google.sheets({ version: 'v4', auth });
     const maxRetries = 10;
     let attempt = 0;
 
     while (attempt < maxRetries) {
         try {
-            await sheets.spreadsheets.values.update({
+            await sheets.spreadsheets.values.batchUpdate({
                 spreadsheetId,
-                range: `Sheet1!M${row}`,
-                valueInputOption: 'USER_ENTERED',
-                requestBody: { values: [[price]] }
+                requestBody: {
+                    valueInputOption: 'USER_ENTERED',
+                    data: data
+                }
             });
 
-            console.log(`Google Sheets updated for row ${row} with price: ${price}`);
+            console.log(`\nGoogle Sheets batch updated successfully for ${data.length} symbols.`);
             return; // Success, exit function
         } catch (error) {
             attempt++;
-            console.log(`Error updating Google Sheets for row ${row} (Attempt ${attempt}/${maxRetries}): ${error.message}`);
+            console.log(`Error during batch update to Google Sheets (Attempt ${attempt}/${maxRetries}): ${error.message}`);
             
             if (attempt >= maxRetries) {
-                console.log(`Max retries reached for row ${row}. Could not update.`);
+                console.log(`Max retries reached. Could not perform batch update.`);
                 break; // Stop retrying after maximum attempts
             }
             
@@ -107,7 +113,7 @@ function getUTCDateString(timestampMs) {
 // PROCESS SYMBOL
 // =====================================================
 
-async function processSymbol(symbol, row) {
+async function processSymbol(symbol) {
     return new Promise((resolve) => {
         console.log(`\n================================`);
         console.log(`PROCESSING ${symbol}`);
@@ -136,10 +142,9 @@ async function processSymbol(symbol, row) {
             console.log(`\n${symbol} PREVIOUS DAILY CLOSE`);
             console.log(`Previous Daily Candle Date (UTC): ${getUTCDateString(prevDailyCandle.time * 1000)}`);
             console.log(`Previous Daily Close Price: ${prevDailyClose}`);
-            await writeToSheet(row, prevDailyClose);
 
             if (typeof chart.delete === 'function') chart.delete();
-            resolve();
+            resolve(prevDailyClose);
         });
 
         // Fallback timeout in case of slow websocket update
@@ -154,17 +159,18 @@ async function processSymbol(symbol, row) {
                     const prevDailyClose = prevDailyCandle.close;
 
                     console.log(`Using Fallback Previous Daily Close Price: ${prevDailyClose}`);
-                    await writeToSheet(row, prevDailyClose);
+                    if (typeof chart.delete === 'function') chart.delete();
+                    resolve(prevDailyClose);
                 } else if (chart.periods && chart.periods.length === 1) {
                     const prevDailyClose = chart.periods[0].close;
                     console.log(`Using Fallback Daily Close Price: ${prevDailyClose}`);
-                    await writeToSheet(row, prevDailyClose);
+                    if (typeof chart.delete === 'function') chart.delete();
+                    resolve(prevDailyClose);
                 } else {
                     console.log(`No valid chart data found for ${symbol}.`);
+                    if (typeof chart.delete === 'function') chart.delete();
+                    resolve(null);
                 }
-
-                if (typeof chart.delete === 'function') chart.delete();
-                resolve();
             }
         }, 8000);
     });
@@ -175,10 +181,29 @@ async function processSymbol(symbol, row) {
 // =====================================================
 
 (async () => {
+    const batchData = [];
+    
     for (const config of configs) {
-        await processSymbol(config.symbol, config.row);
+        const price = await processSymbol(config.symbol);
+        
+        if (price !== null && price !== undefined) {
+            batchData.push({
+                range: `Sheet1!M${config.row}`,
+                values: [[price]]
+            });
+        }
     }
+    
     client.end();
+    
+    // Execute a single Batch Update after all symbols are collected
+    if (batchData.length > 0) {
+        console.log('\n================================');
+        console.log('PERFORMING BATCH UPDATE');
+        console.log('================================');
+        await batchWriteToSheet(batchData);
+    }
+
     console.log('\nALL SYMBOLS COMPLETE');
 })();
 """
