@@ -2,9 +2,6 @@ name: Update Fear & Greed
 
 on:
   workflow_dispatch: 
-  schedule:
-    # Runs every minute. Change this cron syntax to fit your needs!
-    - cron: '* * * * *'
 
 jobs:
   run-python-script:
