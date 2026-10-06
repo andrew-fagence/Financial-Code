@@ -21,9 +21,9 @@ def ensure_config_file(max_tweets=15):
     using environment variables for security.
     """
     os.makedirs('./x-scraper/data', exist_ok=True)
-    username = os.environ.get("TWITTER_USERNAME", "KnowOneScrape")
-    email = os.environ.get("TWITTER_EMAIL", "andrew.s.fagence@gmail.com")
-    password = os.environ.get("TWITTER_PASSWORD", "Creative1!")
+    username = os.environ.get("TWITTER_USERNAME")
+    email = os.environ.get("TWITTER_EMAIL")
+    password = os.environ.get("TWITTER_PASSWORD")
     proxy_url = os.environ.get("PROXY_URL", "")
     use_proxy = "true" if proxy_url else "false"
 
