@@ -19,13 +19,13 @@ SHEET_TAB_NAME = 'Sheet1'
 fred = None
 client = None
 wb = None
+_batch_updates = []  # Added to buffer all cell changes
 
 # =========================
-# RETRY & SLEEP LOGIC WRAPPER
+# BATCH UPDATE LOGIC WRAPPER
 # =========================
 def safe_update_cell(row, col, val):
-    global wb
-    max_retries = 8
+    global _batch_updates
     
     # If the value is not a string (e.g., float, int, numpy type), 
     # we prepend an apostrophe to force it as text. This prevents Google Sheets 
@@ -33,19 +33,8 @@ def safe_update_cell(row, col, val):
     if not isinstance(val, str):
         val = f"'{val}"
         
-    for attempt in range(max_retries):
-        try:
-            wb.update_cell(row, col, val)
-            time.sleep(2.5)  # Paced to ~24 writes/min to strictly prevent 429 limit errors
-            return
-        except Exception as e:
-            if '429' in str(e):
-                sleep_time = 10 * (1.5 ** attempt)
-                print(f"API 429 Quota Exceeded. Sleeping {sleep_time:.1f}s before retrying...")
-                time.sleep(sleep_time)
-            else:
-                raise e
-    print(f"Failed to update cell {row}, {col} after {max_retries} retries.")
+    # Append the update to our buffer instead of making a singular API call
+    _batch_updates.append((row, col, val))
 
 
 def get_fred_series_with_retry(fred_client, ticker, max_retries=6):
@@ -655,5 +644,38 @@ if __name__ == "__main__":
     # Execute Web Scrapers
     scrape_ism_services_history()
     scrape_ism_manufacturing_history()
+    
+    # ==========================================
+    # EXECUTE BATCH UPDATE
+    # ==========================================
+    if _batch_updates:
+        print(f"\nExecuting batch update for {len(_batch_updates)} cells...")
+        
+        # Safely determine the Cell class format depending on your `gspread` version
+        try:
+            Cell = gspread.Cell
+        except AttributeError:
+            try:
+                from gspread.cell import Cell
+            except ImportError:
+                from gspread.models import Cell
+                
+        # Transform our buffered lists into actual gspread Cell objects
+        cells_to_update = [Cell(row=r, col=c, value=v) for r, c, v in _batch_updates]
+        
+        max_retries = 8
+        for attempt in range(max_retries):
+            try:
+                # Issue the 1 single API update to push all values at once
+                wb.update_cells(cells_to_update, value_input_option='USER_ENTERED')
+                print("Batch update complete!")
+                break
+            except Exception as e:
+                if '429' in str(e) and attempt < max_retries - 1:
+                    sleep_time = 10 * (1.5 ** attempt)
+                    print(f"API 429 Quota Exceeded on batch update. Sleeping {sleep_time:.1f}s before retrying...")
+                    time.sleep(sleep_time)
+                else:
+                    raise e
 
     print("Complete!")
