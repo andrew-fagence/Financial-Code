@@ -2,11 +2,16 @@ import time
 import json
 import os
 import gspread
+from datetime import datetime, timedelta  # ADDED: To calculate rolling dates dynamically
 from google import genai
 from ddgs import DDGS  # ADDED: Import for DuckDuckGo Search
 
 def fetch_duckduckgo_context(region: str) -> str:
     """Fetches live web search results from DuckDuckGo based on the region."""
+    
+    # --- ADDED: Calculate the rolling date filter (3 days ago) ---
+    date_filter = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    
     # Maps the region to a highly specific search query to get the best live data
     queries = {
         "USD": "USA Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
@@ -14,7 +19,10 @@ def fetch_duckduckgo_context(region: str) -> str:
         "GBP": "UK Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments",
         "JPY": "Japan Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments"
     }
-    query = queries.get(region, f"{region} current inflation growth labour metrics news")
+    base_query = queries.get(region, f"{region} current inflation growth labour metrics news")
+    
+    # --- ADDED: Append the hard date filter to the query layer ---
+    query = f"{base_query} published after: {date_filter}"
     
     try:
         results = DDGS().text(query, max_results=10)
