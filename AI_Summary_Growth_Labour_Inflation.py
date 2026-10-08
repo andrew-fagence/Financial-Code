@@ -10,7 +10,7 @@ def fetch_duckduckgo_context(region: str) -> str:
     """Fetches live web search results from DuckDuckGo based on the region."""
     
     # --- ADDED: Calculate the rolling date filter (3 days ago) ---
-    date_filter = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    date_filter = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
     
     # Maps the region to a highly specific search query to get the best live data
     queries = {
