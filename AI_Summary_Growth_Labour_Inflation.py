@@ -4,52 +4,27 @@ import os
 import gspread
 from datetime import datetime, timedelta  # ADDED: To calculate rolling dates dynamically
 from google import genai
-from ddgs import DDGS  # ADDED: Import for DuckDuckGo Search
-
-def fetch_duckduckgo_context(region: str) -> str:
-    """Fetches live web search results from DuckDuckGo based on the region."""
-    
-    # --- ADDED: Calculate the rolling date filter (3 days ago) ---
-    date_filter = (datetime.now() - timedelta(days=31)).strftime("%Y-%m-%d")
-    
-    # Maps the region to a highly specific search query to get the best live data
-    queries = {
-        "USD": "USA Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments. Use data only on or after 1st October 2026.",
-        "EUR": "EU Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments. Use data only on or after 1st October 2026.",
-        "GBP": "UK Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments. Use data only on or after 1st October 2026.",
-        "JPY": "Japan Economic data releases and actual results, Central-bank decisions, comments, or speeches that already occurred, Changes in interest-rate expectations, Important moves in government bond yields or rate differentials, Inflation, growth, or labor data, Significant geopolitical or fiscal developments. Use data only on or after 1st October 2026."
-    }
-    base_query = queries.get(region, f"{region} current inflation growth labour metrics news")
-    
-    # --- ADDED: Append the hard date filter to the query layer ---
-    query = f"{base_query} published after: {date_filter}"
-    
-    try:
-        results = DDGS().text(query, max_results=10)
-        if not results:
-            return "No recent search results found."
-        
-        # Formats the returned snippets into a readable context block
-        context = ""
-        for r in results:
-            context += f"- {r.get('title')}: {r.get('body')}\n"
-        return context
-    except Exception as e:
-        return f"Could not fetch search context: {e}"
 
 def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -> str:
-    """Queries Gemini with the provided prompt."""
+    """Queries Gemini with the provided prompt and native Google Search Grounding."""
     
-    # --- ADDED: Fetch DuckDuckGo context and augment the prompt ---
-    search_context = fetch_duckduckgo_context(region)
-    augmented_prompt = f"Live Web Context from DuckDuckGo Search:\n{search_context}\n\nTask:\n{prompt}"
-    # --------------------------------------------------------------
+    # Calculate the rolling date filter (30 days ago)
+    date_filter = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    
+    # Augment the prompt to instruct Gemini to use the search tool with constraints
+    augmented_prompt = (
+        f"You must use the Google Search tool to find relevant live web context. "
+        f"Search for data published after {date_filter} (within the last 30 days). "
+        f"Base your summary on a maximum of 10 search results.\n\n"
+        f"Task:\n{prompt}"
+    )
 
     for attempt in range(10):
         try:
             response = client.models.generate_content(
-                model='gemini-3.1-flash-lite',
-                contents=augmented_prompt  # CHANGED: Passed the augmented prompt instead of the raw prompt
+                model='gemini-3.1-pro',
+                contents=augmented_prompt,
+                config={'tools': [{'google_search': {}}]} # Enables Native Google Search Grounding
             )
             return response.text.strip()
         except Exception as e:
