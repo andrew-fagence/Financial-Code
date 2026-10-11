@@ -200,31 +200,4 @@ if __name__ == "__main__":
 
         ecb_url = "https://tradingeconomics.com/euro-area/interest-rate"
         ecb_context = get_trading_economics_context(ecb_url)
-        ecb_summary = get_ai_summary(client, "European Central Bank (ECB)", ecb, ecb_context)
-        print(f"🇪🇺 ECB AI Summary:\n\"{ecb_summary}\"\n")
-
-        boe_url = "https://tradingeconomics.com/united-kingdom/interest-rate"
-        boe_context = get_trading_economics_context(boe_url)
-        boe_summary = get_ai_summary(client, "Bank of England (BOE)", boe, boe_context)
-        print(f"🇬🇧 BOE AI Summary:\n\"{boe_summary}\"\n")
-
-        boj_url = "https://tradingeconomics.com/japan/interest-rate"
-        boj_context = get_trading_economics_context(boj_url)
-        boj_summary = get_ai_summary(client, "Bank of Japan (BOJ)", boj, boj_context)
-        print(f"🇯🇵 BOJ AI Summary:\n\"{boj_summary}\"\n")
-
-        data_payload = {
-            'fed_rate': f"{fed:.2f}",
-            'fed_summary': fed_summary,
-            'ecb_rate': f"{ecb:.2f}",
-            'ecb_summary': ecb_summary,
-            'boe_rate': f"{boe:.2f}",
-            'boe_summary': boe_summary,
-            'boj_rate': f"{boj:.2f}",
-            'boj_summary': boj_summary
-        }
-
-        update_google_sheets(SPREADSHEET_ID, GCP_CREDENTIALS, data_payload)
-
-    except Exception as e:
-        print(f"\n❌ A critical error occurred: {e}")
+        ecb_summary = get_ai_sum
