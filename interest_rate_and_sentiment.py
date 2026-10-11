@@ -5,6 +5,7 @@ import time
 import json
 import os
 import gspread
+import re
 from google import genai
 from bs4 import BeautifulSoup
 
