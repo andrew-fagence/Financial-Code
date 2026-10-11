@@ -3,9 +3,9 @@ import requests
 import io
 import time
 import json
+import re
 import os
 import gspread
-import re
 from google import genai
 from bs4 import BeautifulSoup
 
@@ -52,12 +52,17 @@ def get_fed_rate() -> float:
                 continue
             if len(cells) >= 4:
                 match = re.search(
-                    r"(\d+.\d+)\s[-–]\s(\d+.\d+)",
+                    r"(\d+\.\d+)\s*[-–]\s*(\d+\.\d+)",
                     cells[-1]
                 )
                 if match:
                     return f"{match.group(1)}–{match.group(2)}"
     raise ValueError("Could not find the Fed target range on the official website.")
+
+
+
+
+
 
 def get_ecb_rate() -> float:
     url = "https://data-api.ecb.europa.eu/service/data/FM/D.U2.EUR.4F.KR.DFR.LEV?lastNObservations=1&format=csvdata"
