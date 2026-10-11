@@ -130,13 +130,31 @@ def update_forex_calendar():
 
                 # Standard event row
                 if len(cols) >= 3:
-                    if get_impact_rating(cols[2]) != "High":
-                        continue
-
                     raw_time = cols[0].get_text(strip=True)
                     raw_event = cols[1].get_text(strip=True)
                     raw_prior = cols[3].get_text(strip=True) if len(cols) > 3 else ""
                     raw_consensus = cols[4].get_text(strip=True) if len(cols) > 4 else ""
+
+                    # Detect if it is a Bank Holiday
+                    is_holiday = False
+                    # Holidays appear at 12:00 AM (or 'All Day') with no forecast or previous data
+                    if ("12:00 am" in raw_time.lower() or "all day" in raw_time.lower()) and (not raw_prior or raw_prior == "-") and (not raw_consensus or raw_consensus == "-"):
+                        # Exhaustive verification list for US, EU, UK, and JP holidays
+                        holiday_keywords = [
+                            'day', 'holiday', 'eve', 'friday', 'monday', 'easter', 'christmas', 
+                            'thanksgiving', 'birthday', 'year', 'week', 'festival', 'feast', 
+                            'equinox', 'solstice', 'christi', 'carnival', 'assumption', 'ascension', 
+                            'saints', 'conception', 'epiphany', 'pentecost', 'juneteenth', 
+                            'armistice', 'remembrance', 'boxing', 'labor', 'labour', 'independence', 
+                            'golden', 'showa', 'obon', 'emperor', 'national', 'bank', 
+                            'spring', 'summer', 'autumn', 'winter'
+                        ]
+                        if any(k in raw_event.lower() for k in holiday_keywords):
+                            is_holiday = True
+
+                    # Only process events that are High impact OR correctly identified Bank Holidays
+                    if get_impact_rating(cols[2]) != "High" and not is_holiday:
+                        continue
 
                     prior_val = raw_prior if raw_prior else "N/A"
                     consensus_val = raw_consensus if raw_consensus else "N/A"
