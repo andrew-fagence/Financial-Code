@@ -30,10 +30,33 @@ def fetch_with_retry(url: str, retries: int = 3, timeout_sec: int = 15) -> str:
             time.sleep(sleep_time)
 
 def get_fed_rate() -> float:
-    url = "https://markets.newyorkfed.org/api/rates/unsecured/effr/last/1.json"
-    json_text = fetch_with_retry(url)
-    data = json.loads(json_text)
-    return float(data['refRates'][0]['percentRate'])
+    url = "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"
+    html = fetch_with_retry(url)
+    soup = BeautifulSoup(html, "html.parser")
+    # Find the 2026 policy-rate table
+    for table in soup.find_all("table"):
+        headers = [
+            th.get_text(" ", strip=True).lower()
+            for th in table.find_all("th")
+        ]
+        if not any("level" in h for h in headers):
+            continue
+        rows = table.find_all("tr")
+        for row in rows[1:]:
+            cells = [
+                cell.get_text(" ", strip=True)
+                for cell in row.find_all(["td", "th"])
+            ]
+            if len(cells) >= 4 and "2026" in cells[0]:
+                continue
+            if len(cells) >= 4:
+                match = re.search(
+                    r"(\d+.\d+)\s[-–]\s(\d+.\d+)",
+                    cells[-1]
+                )
+                if match:
+                    return f"{match.group(1)}–{match.group(2)}"
+    raise ValueError("Could not find the Fed target range on the official website.")
 
 def get_ecb_rate() -> float:
     url = "https://data-api.ecb.europa.eu/service/data/FM/D.U2.EUR.4F.KR.DFR.LEV?lastNObservations=1&format=csvdata"
@@ -151,7 +174,7 @@ if __name__ == "__main__":
 
     try:
         fed = get_fed_rate()
-        print(f"🇺🇸 FED Rate: {fed:.2f}% (EFFR)")
+        print(f"🇺🇸 FED Target Range: {fed}%")
 
         ecb = get_ecb_rate()
         print(f"🇪🇺 ECB Rate: {ecb:.2f}%")
