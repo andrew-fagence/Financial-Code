@@ -22,7 +22,7 @@ def get_ai_summary_with_search(client: genai.Client, region: str, prompt: str) -
     for attempt in range(10):
         try:
             response = client.models.generate_content(
-                model='gemini-3.1-pro-preview',
+                model='gemini-3.8-flash',
                 contents=augmented_prompt,
                 config={'tools': [{'google_search': {}}]} # Enables Native Google Search Grounding
             )
