@@ -175,9 +175,9 @@ def update_forex_calendar():
 
                         clean_event_name = " ".join(clean_event_name.split())
                         
-                        # Append "(Bank Holiday)" to the end of the name if the event is a bank holiday
+                        # Format as "Bank Holiday ([Bank Holiday Name])" if the event is a bank holiday
                         if is_holiday:
-                            clean_event_name += " (Bank Holiday)"
+                            clean_event_name = f"Bank Holiday ({clean_event_name})"
 
                         if current_date_obj:
                             uk_date, uk_time = convert_to_uk_time(current_date_obj, raw_time)
