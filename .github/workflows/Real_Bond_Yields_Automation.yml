@@ -1,7 +1,6 @@
 name: Real Bond Yields Automation
 
 on:
-  schedule:
   workflow_dispatch: # Allows you to manually trigger the run via the GitHub Actions tab
 
 jobs:
