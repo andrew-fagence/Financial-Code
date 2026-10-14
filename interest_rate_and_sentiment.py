@@ -59,11 +59,6 @@ def get_fed_rate() -> float:
                     return f"{match.group(1)}–{match.group(2)}"
     raise ValueError("Could not find the Fed target range on the official website.")
 
-
-
-
-
-
 def get_ecb_rate() -> float:
     url = "https://data-api.ecb.europa.eu/service/data/FM/D.U2.EUR.4F.KR.DFR.LEV?lastNObservations=1&format=csvdata"
     csv_text = fetch_with_retry(url)
@@ -103,7 +98,7 @@ def get_ai_summary(client: genai.Client, bank_name: str, rate: float, outlook_co
     for attempt in range(10):
         try:
             response = client.models.generate_content(
-                model='gemini-3.1-pro-preview',
+                model='gemini-4-argon',
                 contents=prompt
             )
             return response.text.strip()
