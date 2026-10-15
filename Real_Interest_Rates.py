@@ -28,6 +28,15 @@ wb = sheet.sheet1  # Defines 'wb' so your subsequent code blocks work
 values_list = wb.row_values(1)
 print(values_list)
 
+# Read all sheet values in one API call to prevent exceeding the read quota
+all_values = wb.get_all_values()
+
+def get_cell_value(row, col):
+    try:
+        return all_values[row - 1][col - 1]
+    except IndexError:
+        return ''
+
 # We will collect all cell updates in this list and batch upload them in 1 go
 updates = []
 
@@ -45,7 +54,7 @@ rate = get_us_interest_rate()
 print(f"US Fed upper interest rate: {rate:.2f}%")
 
 # Get USA Inflation Rate
-currentPCEHinflation = float(wb.cell(12, 31).value)
+currentPCEHinflation = float(get_cell_value(12, 31))
 currentPCEHinflation = round(currentPCEHinflation, 1)
 print(currentPCEHinflation)
 
@@ -89,7 +98,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(173, 2), 'values': [[current
 
 
 ########################################### 30 Year Real Interest Rate ##############################
-currentThirtyYearYield = float(wb.cell(146, 11).value)
+currentThirtyYearYield = float(get_cell_value(146, 11))
 print(currentThirtyYearYield)
 
 currentUSThirtyRealInterestRate = currentThirtyYearYield - currentPCEHinflation
@@ -100,12 +109,12 @@ updates.append({'range': gspread.utils.rowcol_to_a1(174, 2), 'values': [[current
 
 
 ####################################### Current EUR inflation rate ##############################################
-currentEURInflationRate = float(wb.cell(13, 13).value)
+currentEURInflationRate = float(get_cell_value(13, 13))
 print(currentEURInflationRate)
 
 
 ########################################### USING EUR FUNDS RATE ################################################
-currentInterestRate = float(wb.cell(36, 8).value)
+currentInterestRate = float(get_cell_value(36, 8))
 print(currentInterestRate)
 currentInterestRealInterestRate = currentInterestRate - currentEURInflationRate
 currentInterestRealInterestRate = round(currentInterestRealInterestRate, 2)
@@ -116,7 +125,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(171, 3), 'values': [[current
 
 ######################################## EUR 1 Year Real Interest Rate ##########################################
 print('#############One Year###########')
-currentOneYearInterestRate = float(wb.cell(147, 4).value)
+currentOneYearInterestRate = float(get_cell_value(147, 4))
 print(currentOneYearInterestRate)
 
 OneYearRealInterestRate = currentOneYearInterestRate - currentEURInflationRate
@@ -128,7 +137,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(172, 3), 'values': [[OneYear
 
 ######################################## EUR 10 Year Real Interest Rate ##########################################
 print('############# Ten Year ###########')
-currentTenYearInterestRate = float(wb.cell(147, 9).value)
+currentTenYearInterestRate = float(get_cell_value(147, 9))
 print(currentTenYearInterestRate)
 
 TenYearRealInterestRate = currentTenYearInterestRate - currentEURInflationRate
@@ -140,7 +149,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(173, 3), 'values': [[TenYear
 
 ######################################## EUR 30 Year Real Interest Rate ##########################################
 print('############# Thirty Year ###########')
-currentThirtyYearInterestRate = float(wb.cell(147, 11).value)
+currentThirtyYearInterestRate = float(get_cell_value(147, 11))
 print(currentThirtyYearInterestRate)
 
 ThirtyYearRealInterestRate = currentThirtyYearInterestRate - currentEURInflationRate
@@ -151,12 +160,12 @@ updates.append({'range': gspread.utils.rowcol_to_a1(174, 3), 'values': [[ThirtyY
 
 
 ####################################### Current GBP inflation rate ##############################################
-currentGBPInflationRate = float(wb.cell(14, 13).value)
+currentGBPInflationRate = float(get_cell_value(14, 13))
 print(currentGBPInflationRate)
 
 
 ########################################### USING GBP FUNDS RATE ################################################
-currentGBPInterestRate = float(wb.cell(38, 8).value)
+currentGBPInterestRate = float(get_cell_value(38, 8))
 print(currentGBPInterestRate)
 currentGBPInterestRealInterestRate = currentGBPInterestRate - currentGBPInflationRate
 currentGBPInterestRealInterestRate = round(currentGBPInterestRealInterestRate, 2)
@@ -167,7 +176,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(171, 4), 'values': [[current
 
 ######################################## GBP 1 Year Real Interest Rate ##########################################
 print('#############One Year###########')
-currentGBPOneYearInterestRate = float(wb.cell(148, 4).value)
+currentGBPOneYearInterestRate = float(get_cell_value(148, 4))
 print(currentGBPOneYearInterestRate)
 
 GBPOneYearRealInterestRate = currentGBPOneYearInterestRate - currentGBPInflationRate
@@ -179,7 +188,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(172, 4), 'values': [[GBPOneY
 
 ######################################## GBP 10 Year Real Interest Rate ##########################################
 print('############# Ten Year ###########')
-currentGBPTenYearInterestRate = float(wb.cell(148, 9).value)
+currentGBPTenYearInterestRate = float(get_cell_value(148, 9))
 print(currentGBPTenYearInterestRate)
 
 GBPTenYearRealInterestRate = currentGBPTenYearInterestRate - currentGBPInflationRate
@@ -191,7 +200,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(173, 4), 'values': [[GBPTenY
 
 ######################################## GBP 30 Year Real Interest Rate ##########################################
 print('############# Thirty Year ###########')
-currentGBPThirtyYearInterestRate = float(wb.cell(148, 11).value)
+currentGBPThirtyYearInterestRate = float(get_cell_value(148, 11))
 print(currentGBPThirtyYearInterestRate)
 
 GBPThirtyYearRealInterestRate = currentGBPThirtyYearInterestRate - currentGBPInflationRate
@@ -202,12 +211,12 @@ updates.append({'range': gspread.utils.rowcol_to_a1(174, 4), 'values': [[GBPThir
 
 
 ####################################### Current JPY inflation rate ##############################################
-currentJPYInflationRate = float(wb.cell(15, 13).value)
+currentJPYInflationRate = float(get_cell_value(15, 13))
 print(currentJPYInflationRate)
 
 
 ########################################### USING JPY FUNDS RATE ################################################
-currentJPYInterestRate = float(wb.cell(34, 11).value)
+currentJPYInterestRate = float(get_cell_value(34, 11))
 print(currentJPYInterestRate)
 currentJPYInterestRealInterestRate = currentJPYInterestRate - currentJPYInflationRate
 currentJPYInterestRealInterestRate = round(currentJPYInterestRealInterestRate, 2)
@@ -218,7 +227,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(171, 5), 'values': [[current
 
 ######################################## JPY 1 Year Real Interest Rate ##########################################
 print('#############One Year###########')
-currentJPYOneYearInterestRate = float(wb.cell(149, 4).value)
+currentJPYOneYearInterestRate = float(get_cell_value(149, 4))
 print(currentJPYOneYearInterestRate)
 
 JPYOneYearRealInterestRate = currentJPYOneYearInterestRate - currentJPYInflationRate
@@ -230,7 +239,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(172, 5), 'values': [[JPYOneY
 
 ######################################## JPY 10 Year Real Interest Rate ##########################################
 print('############# Ten Year ###########')
-currentJPYTenYearInterestRate = float(wb.cell(149, 9).value)
+currentJPYTenYearInterestRate = float(get_cell_value(149, 9))
 print(currentJPYTenYearInterestRate)
 
 JPYTenYearRealInterestRate = currentJPYTenYearInterestRate - currentJPYInflationRate
@@ -242,7 +251,7 @@ updates.append({'range': gspread.utils.rowcol_to_a1(173, 5), 'values': [[JPYTenY
 
 ######################################## JPY 30 Year Real Interest Rate ##########################################
 print('############# Thirty Year ###########')
-currentJPYThirtyYearInterestRate = float(wb.cell(149, 11).value)
+currentJPYThirtyYearInterestRate = float(get_cell_value(149, 11))
 print(currentJPYThirtyYearInterestRate)
 
 JPYThirtyYearRealInterestRate = currentJPYThirtyYearInterestRate - currentJPYInflationRate
