@@ -53,6 +53,7 @@ def clean_and_move_cookies():
     """
     Finds playwright_cookies.json in the repository directory,
     cleans legacy or invalid sameSite values (like 'no_restriction', 'unspecified', or null),
+    keeps ONLY the auth_token to force Twitter to generate fresh CSRF tokens (ct0),
     converts cookie attributes to comply strictly with Playwright's expectations,
     and saves the cleaned cookies to bypass the login phase.
     """
@@ -82,6 +83,11 @@ def clean_and_move_cookies():
             valid_samesite_values = {"Strict", "Lax", "None"}
 
             for cookie in cookies:
+                # KEEP ONLY auth_token TO PREVENT STALE ct0 (CSRF) TOKEN MISMATCHES!
+                # Twitter will automatically generate fresh session cookies if the auth_token is valid.
+                if cookie.get('name') != 'auth_token':
+                    continue
+
                 cleaned_cookie = {}
 
                 # Copy required fields
@@ -92,13 +98,20 @@ def clean_and_move_cookies():
                 else:
                     continue  # Skip invalid cookies without values
 
-                # Copy standard optional fields
+                # Copy standard optional fields & force domain transition
                 if 'domain' in cookie:
-                    cleaned_cookie['domain'] = str(cookie['domain'])
+                    domain = str(cookie['domain'])
+                    if 'twitter.com' in domain:
+                        domain = domain.replace('twitter.com', 'x.com')
+                    cleaned_cookie['domain'] = domain
+                    
                 if 'path' in cookie:
                     cleaned_cookie['path'] = str(cookie['path'])
                 if 'secure' in cookie:
                     cleaned_cookie['secure'] = bool(cookie['secure'])
+                else:
+                    cleaned_cookie['secure'] = True  # Default to secure
+                    
                 if 'httpOnly' in cookie:
                     cleaned_cookie['httpOnly'] = bool(cookie['httpOnly'])
 
@@ -122,6 +135,10 @@ def clean_and_move_cookies():
                         else:
                             # Let Playwright default by omitting the sameSite property completely
                             pass
+                
+                # Strict Playwright requirement: sameSite="None" requires secure=True
+                if cleaned_cookie.get('sameSite') == 'None':
+                    cleaned_cookie['secure'] = True
 
                 cleaned_cookies.append(cleaned_cookie)
 
