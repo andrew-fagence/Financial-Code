@@ -53,7 +53,6 @@ def clean_and_move_cookies():
     """
     Finds playwright_cookies.json in the repository directory,
     cleans legacy or invalid sameSite values (like 'no_restriction', 'unspecified', or null),
-    keeps ONLY the auth_token to force Twitter to generate fresh CSRF tokens (ct0),
     converts cookie attributes to comply strictly with Playwright's expectations,
     and saves the cleaned cookies to bypass the login phase.
     """
@@ -83,11 +82,6 @@ def clean_and_move_cookies():
             valid_samesite_values = {"Strict", "Lax", "None"}
 
             for cookie in cookies:
-                # KEEP ONLY auth_token TO PREVENT STALE ct0 (CSRF) TOKEN MISMATCHES!
-                # Twitter will automatically generate fresh session cookies if the auth_token is valid.
-                if cookie.get('name') != 'auth_token':
-                    continue
-
                 cleaned_cookie = {}
 
                 # Copy required fields
@@ -98,20 +92,13 @@ def clean_and_move_cookies():
                 else:
                     continue  # Skip invalid cookies without values
 
-                # Copy standard optional fields & force domain transition
+                # Copy standard optional fields
                 if 'domain' in cookie:
-                    domain = str(cookie['domain'])
-                    if 'twitter.com' in domain:
-                        domain = domain.replace('twitter.com', 'x.com')
-                    cleaned_cookie['domain'] = domain
-                    
+                    cleaned_cookie['domain'] = str(cookie['domain'])
                 if 'path' in cookie:
                     cleaned_cookie['path'] = str(cookie['path'])
                 if 'secure' in cookie:
                     cleaned_cookie['secure'] = bool(cookie['secure'])
-                else:
-                    cleaned_cookie['secure'] = True  # Default to secure
-                    
                 if 'httpOnly' in cookie:
                     cleaned_cookie['httpOnly'] = bool(cookie['httpOnly'])
 
@@ -135,10 +122,6 @@ def clean_and_move_cookies():
                         else:
                             # Let Playwright default by omitting the sameSite property completely
                             pass
-                
-                # Strict Playwright requirement: sameSite="None" requires secure=True
-                if cleaned_cookie.get('sameSite') == 'None':
-                    cleaned_cookie['secure'] = True
 
                 cleaned_cookies.append(cleaned_cookie)
 
@@ -379,22 +362,67 @@ def update_google_sheet_with_tweets(accounts):
 
         # 1. Locate the correct JSON file for the account
         latest_file = find_scraped_file(username)
-        if not latest_file:
-            print(f"No scraped data found for {username}. Skipping extraction.")
-            continue
-
-        print(f"Parsing data from: {latest_file}")
-
-        try:
-            with open(latest_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"Failed to read JSON for {username}: {e}")
-            continue
+        data = {}
+        if latest_file:
+            print(f"Parsing data from: {latest_file}")
+            try:
+                with open(latest_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception as e:
+                print(f"Failed to read JSON for {username}: {e}")
 
         tweets = data.get("tweets", [])
+        
+        # --- SYNDICATION FALLBACK LOGIC ---
         if not tweets:
-            print(f"No tweets found in the exported JSON file for {username}.")
+            print(f"No tweets found in the exported JSON file for {username}. Attempting Syndication API fallback...")
+            try:
+                import urllib.request
+                url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
+                req = urllib.request.Request(url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                })
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    html = response.read().decode('utf-8')
+                
+                match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', html)
+                if match:
+                    syndication_data = json.loads(match.group(1))
+                    
+                    def extract_syndication_tweets(obj):
+                        if isinstance(obj, dict):
+                            if 'text' in obj and 'created_at' in obj and 'id_str' in obj:
+                                author = obj.get('user', {}).get('screen_name', '')
+                                if not author or author.lower() == username.lower():
+                                    tweets.append({
+                                        'text': obj.get('full_text') or obj.get('text', ''),
+                                        'created_at': obj.get('created_at', '')
+                                    })
+                            for k, v in obj.items():
+                                extract_syndication_tweets(v)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                extract_syndication_tweets(item)
+                                
+                    extract_syndication_tweets(syndication_data)
+                    
+                    if tweets:
+                        # Deduplicate identically matching fallback texts
+                        seen_texts = set()
+                        unique_tweets = []
+                        for t in tweets:
+                            if t['text'] not in seen_texts:
+                                seen_texts.add(t['text'])
+                                unique_tweets.append(t)
+                        tweets = unique_tweets
+                        print(f"Successfully retrieved {len(tweets)} tweets via Syndication fallback for {username}!")
+            except Exception as e:
+                print(f"Syndication fallback failed for {username}: {e}")
+        # --- END FALLBACK LOGIC ---
+
+        if not tweets:
+            print(f"No tweets found via Scraper or Fallback for {username}.")
             continue
 
         count = 0
