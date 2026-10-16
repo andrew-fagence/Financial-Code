@@ -53,6 +53,7 @@ def clean_and_move_cookies():
     """
     Finds playwright_cookies.json in the repository directory,
     cleans legacy or invalid sameSite values (like 'no_restriction', 'unspecified', or null),
+    keeps ONLY the auth_token to force Twitter to generate fresh CSRF tokens (ct0),
     converts cookie attributes to comply strictly with Playwright's expectations,
     and saves the cleaned cookies to bypass the login phase.
     """
@@ -82,6 +83,10 @@ def clean_and_move_cookies():
             valid_samesite_values = {"Strict", "Lax", "None"}
 
             for cookie in cookies:
+                # KEEP ONLY auth_token TO PREVENT STALE ct0 (CSRF) TOKEN MISMATCHES!
+                if cookie.get('name') != 'auth_token':
+                    continue
+
                 cleaned_cookie = {}
 
                 # Copy required fields
@@ -92,13 +97,20 @@ def clean_and_move_cookies():
                 else:
                     continue  # Skip invalid cookies without values
 
-                # Copy standard optional fields
+                # Copy standard optional fields & force domain transition
                 if 'domain' in cookie:
-                    cleaned_cookie['domain'] = str(cookie['domain'])
+                    domain = str(cookie['domain'])
+                    if 'twitter.com' in domain:
+                        domain = domain.replace('twitter.com', 'x.com')
+                    cleaned_cookie['domain'] = domain
+                    
                 if 'path' in cookie:
                     cleaned_cookie['path'] = str(cookie['path'])
                 if 'secure' in cookie:
                     cleaned_cookie['secure'] = bool(cookie['secure'])
+                else:
+                    cleaned_cookie['secure'] = True  # Default to secure
+                    
                 if 'httpOnly' in cookie:
                     cleaned_cookie['httpOnly'] = bool(cookie['httpOnly'])
 
@@ -120,8 +132,10 @@ def clean_and_move_cookies():
                         elif s_str.lower() in ["no_restriction", "unspecified"]:
                             cleaned_cookie['sameSite'] = "None"
                         else:
-                            # Let Playwright default by omitting the sameSite property completely
                             pass
+                
+                if cleaned_cookie.get('sameSite') == 'None':
+                    cleaned_cookie['secure'] = True
 
                 cleaned_cookies.append(cleaned_cookie)
 
@@ -184,31 +198,26 @@ def _recursive_find(obj, key):
     return None
 
 async def ultimate_intercept_response(self, response):
-    # 1. Run the original interceptor so we don't break existing dependencies
     if hasattr(self, '_original_intercept_response'):
         await self._original_intercept_response(response)
         
     try:
         url = response.url
-        # Catch ALL Twitter API traffic, regardless of endpoint name
         if 'graphql' in url.lower() or 'api.twitter.com' in url or 'api.x.com' in url:
             if response.request.resource_type in ["xhr", "fetch"]:
                 try:
                     data = await response.json()
                     
-                    # --- DIAGNOSTICS: Catch hidden Twitter bans/rate limits ---
                     if isinstance(data, dict):
                         if 'errors' in data:
                             self.logger.error(f"🚨 TWITTER API ERROR from {url.split('/')[-1].split('?')[0]}: {data['errors']}")
                         elif data.get('data', {}).get('user', {}).get('result', {}).get('__typename') == 'UserUnavailable':
                             self.logger.error(f"🚨 TWITTER ACCOUNT BANNED OR UNAVAILABLE: {data}")
                     
-                    # --- AGGRESSIVE TWEET EXTRACTION ---
                     tweets_found = 0
                     def extract_tweets_recursively(obj):
                         nonlocal tweets_found
                         if isinstance(obj, dict):
-                            # A valid tweet object always contains a 'legacy' dict with 'full_text'
                             if 'legacy' in obj and isinstance(obj['legacy'], dict) and 'full_text' in obj['legacy']:
                                 legacy = obj['legacy']
                                 tweet_id = legacy.get('id_str') or obj.get('rest_id')
@@ -258,7 +267,6 @@ async def ultimate_intercept_response(self, response):
     except Exception as e:
         pass
 
-# Dynamically apply the Omni-Interceptor at runtime
 for obj_name, obj in list(locals().items()):
     if isinstance(obj, type) and hasattr(obj, '_intercept_response'):
         if not hasattr(obj, '_original_intercept_response'):
@@ -280,7 +288,6 @@ for obj_name, obj in list(locals().items()):
 
 def scrape_all_accounts(accounts):
     print("Ensuring virtual display dependencies are installed...")
-    # Install xvfb cleanly if it isn't already present in the environment
     subprocess.run(["apt-get", "install", "-y", "xvfb"], capture_output=True)
 
     success_count = 0
@@ -289,7 +296,6 @@ def scrape_all_accounts(accounts):
         print(f"Starting X-Scraper for {username}...\n")
         print(f"--- SCRAPER LOGS FOR {username} START ---")
 
-        # Prefixing the command with xvfb-run to provide a virtual cloud monitor
         cmd = [
             "xvfb-run",
             "--auto-servernum",
@@ -300,13 +306,12 @@ def scrape_all_accounts(accounts):
             "--username", username
         ]
 
-        # Force Python to not buffer the output
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
         result = subprocess.run(
             cmd,
-            cwd="./x-scraper",  # Fixed path to operate relative to GitHub repo root
+            cwd="./x-scraper",
             capture_output=True,
             text=True,
             env=env
@@ -342,9 +347,7 @@ def find_scraped_file(username):
         if os.path.exists(path):
             return path
 
-    # Fallback to recursive search
     list_of_files = glob.glob(f'{DATA_DIR}/**/*.json', recursive=True)
-    # Ignore cookie configurations or other files
     valid_files = [
         f for f in list_of_files
         if username.lower() in os.path.basename(f).lower() and "cookie" not in os.path.basename(f).lower()
@@ -355,12 +358,11 @@ def find_scraped_file(username):
     return None
 
 def update_google_sheet_with_tweets(accounts):
-    all_extracted_tweets = []  # Will store tuples of (datetime_object, sanitized_content)
+    all_extracted_tweets = []  
 
     for acc in accounts:
         username = acc["username"]
 
-        # 1. Locate the correct JSON file for the account
         latest_file = find_scraped_file(username)
         data = {}
         if latest_file:
@@ -373,118 +375,131 @@ def update_google_sheet_with_tweets(accounts):
 
         tweets = data.get("tweets", [])
         
-        # --- SYNDICATION FALLBACK LOGIC ---
+        # --- ROBUST SYNDICATION FALLBACK LOGIC WITH PROXY ROTATION ---
         if not tweets:
-            print(f"No tweets found in the exported JSON file for {username}. Attempting Syndication API fallback...")
+            print(f"No tweets found in the exported JSON file for {username}. Attempting Syndication API fallback via proxy rotators...")
             try:
                 import urllib.request
-                url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
-                req = urllib.request.Request(url, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-                })
-                with urllib.request.urlopen(req, timeout=15) as response:
-                    html = response.read().decode('utf-8')
+                import urllib.parse
                 
-                match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', html)
-                if match:
-                    syndication_data = json.loads(match.group(1))
-                    
-                    def extract_syndication_tweets(obj):
-                        if isinstance(obj, dict):
-                            if 'text' in obj and 'created_at' in obj and 'id_str' in obj:
-                                author = obj.get('user', {}).get('screen_name', '')
-                                if not author or author.lower() == username.lower():
-                                    tweets.append({
-                                        'text': obj.get('full_text') or obj.get('text', ''),
-                                        'created_at': obj.get('created_at', '')
-                                    })
-                            for k, v in obj.items():
-                                extract_syndication_tweets(v)
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                extract_syndication_tweets(item)
-                                
-                    extract_syndication_tweets(syndication_data)
-                    
-                    if tweets:
-                        # Deduplicate identically matching fallback texts
-                        seen_texts = set()
-                        unique_tweets = []
-                        for t in tweets:
-                            if t['text'] not in seen_texts:
-                                seen_texts.add(t['text'])
-                                unique_tweets.append(t)
-                        tweets = unique_tweets
-                        print(f"Successfully retrieved {len(tweets)} tweets via Syndication fallback for {username}!")
+                base_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
+                
+                # A list of free public proxies to instantly bypass GitHub Actions IP bans (429)
+                proxy_services = [
+                    "",  # 1. Direct Connection (try first)
+                    "https://api.codetabs.com/v1/proxy?quest=",  # 2. CodeTabs Open Proxy
+                    "https://api.allorigins.win/raw?url="  # 3. AllOrigins CORS Proxy
+                ]
+                
+                html = None
+                for proxy in proxy_services:
+                    try:
+                        # Some proxies require the target URL to be perfectly URL-encoded
+                        if "allorigins" in proxy:
+                            target_url = proxy + urllib.parse.quote(base_url)
+                        else:
+                            target_url = proxy + base_url
+                            
+                        req = urllib.request.Request(target_url, headers={
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                        })
+                        
+                        with urllib.request.urlopen(req, timeout=15) as response:
+                            response_text = response.read().decode('utf-8')
+                            
+                            # A successful connection to Twitter returns the __NEXT_DATA__ JSON payload
+                            if '__NEXT_DATA__' in response_text:
+                                html = response_text
+                                connection_type = 'Proxy Wrapper' if proxy else 'Direct Connection'
+                                print(f"Successfully connected to Syndication API via {connection_type}.")
+                                break
+                    except Exception as proxy_err:
+                        continue  # Silently skip to the next proxy node
+                
+                if html:
+                    match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', html)
+                    if match:
+                        syndication_data = json.loads(match.group(1))
+                        
+                        def extract_syndication_tweets(obj):
+                            if isinstance(obj, dict):
+                                if 'text' in obj and 'created_at' in obj and 'id_str' in obj:
+                                    author = obj.get('user', {}).get('screen_name', '')
+                                    if not author or author.lower() == username.lower():
+                                        tweets.append({
+                                            'text': obj.get('full_text') or obj.get('text', ''),
+                                            'created_at': obj.get('created_at', '')
+                                        })
+                                for k, v in obj.items():
+                                    extract_syndication_tweets(v)
+                            elif isinstance(obj, list):
+                                for item in obj:
+                                    extract_syndication_tweets(item)
+                                    
+                        extract_syndication_tweets(syndication_data)
+                        
+                        if tweets:
+                            seen_texts = set()
+                            unique_tweets = []
+                            for t in tweets:
+                                if t['text'] not in seen_texts:
+                                    seen_texts.add(t['text'])
+                                    unique_tweets.append(t)
+                            tweets = unique_tweets
+                            print(f"Successfully retrieved {len(tweets)} tweets via Syndication fallback for {username}!")
+                else:
+                    print(f"All Syndication endpoints (including proxy rotators) failed to bypass the 429 rate limit for {username}.")
             except Exception as e:
-                print(f"Syndication fallback failed for {username}: {e}")
+                print(f"Syndication fallback encountered a critical error for {username}: {e}")
         # --- END FALLBACK LOGIC ---
 
         if not tweets:
-            print(f"No tweets found via Scraper or Fallback for {username}.")
+            print(f"No tweets found via Scraper or Proxy Fallbacks for {username}.")
             continue
 
         count = 0
         for tweet in tweets:
-            if count >= 5:  # Restricts output to exactly 5 tweets per account
+            if count >= 5: 
                 break
             content = tweet.get("text", "").strip()
             if not content:
-                continue  # Skip empty messages
+                continue 
 
             # --- DATA SANITIZATION ---
-            # Remove boilerplate prefixes
             content = re.sub(r"^BREAKING:\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"^UPDATE:\s*", "", content, flags=re.IGNORECASE)
             content = re.sub(r"^EXCLUSIVE:\s*", "", content, flags=re.IGNORECASE)
             
-            # Remove specific custom phrases
             content = re.sub(r"🔴\s*More on", "", content, flags=re.IGNORECASE)
             content = re.sub(r"🔴\s*LIVE updates:", "", content, flags=re.IGNORECASE)
             content = re.sub(r"Here's what we know\.", "", content, flags=re.IGNORECASE)
             
-            # Remove the "For more on this and other news visit [URL]" section
             content = re.sub(r"\s*For more on this and other news visit.*$", "", content, flags=re.IGNORECASE)
-
-            # Sanitize "Watch:" out of every retrieved tweet
             content = re.sub(r"Watch:", "", content, flags=re.IGNORECASE)
-            
-            # Remove volume emojis specifically
             content = re.sub(r"🔊", "", content)
             
-            # Match the whole sentence containing BOTH "reuters" and "podcast" and remove it completely
             content = re.sub(r"[^.!?\n]*(?:reuters[^.!?\n]*podcast|podcast[^.!?\n]*reuters)[^.!?\n]*[.!?\n]*", "", content, flags=re.IGNORECASE)
             
-            # Remove all URLs (this naturally catches the URLs at the end of the tweet)
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
-
-            # Remove strings matching "co/xxxxxxxxx" with alphanumeric characters of any length
             content = re.sub(r"co/[a-zA-Z0-9]+", "", content)
-
-            # Remove all hashtags
             content = re.sub(r"#\w+", "", content)
 
-            # Sanitize ALL emojis out of text (including zero-width joiners, skin tones, and keycaps)
             content = re.sub(
                 r"[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u200d\ufe0f\U0001F1E6-\U0001F1FF\u20e3]",
                 "",
                 content
             )
 
-            # Clean up double spaces created by the removals and trim all leading/trailing whitespace
             content = re.sub(r"\s+", " ", content).strip()
 
             if not content:
-                continue  # Skip if cleaning left the message completely empty
+                continue 
             
-            # --- DATA FILTERING ---
-            # Rule: only tweets more than 2 words, and less than or equal to 400 words are retrieved
             word_count = len(content.split())
             if word_count <= 2 or word_count > 400:
                 continue
             
-            # Append a full stop only if the content does not end in a full stop (.), exclamation mark (!), or question mark (?)
             if not content.endswith(('.', '!', '?')):
                 content += '.'
 
@@ -494,14 +509,12 @@ def update_google_sheet_with_tweets(accounts):
             
             if date_str:
                 try:
-                    # Attempt standard Twitter API date parsing
                     dt = parsedate_to_datetime(date_str)
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=datetime.timezone.utc)
                     parsed_date = dt
                 except Exception:
                     try:
-                        # Attempt standard ISO 8601 parsing fallback
                         dt = datetime.datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=datetime.timezone.utc)
@@ -509,7 +522,6 @@ def update_google_sheet_with_tweets(accounts):
                     except Exception:
                         pass
 
-            # Append as a tuple so we can sort them all globally later
             all_extracted_tweets.append((parsed_date, content))
             count += 1
 
@@ -517,13 +529,10 @@ def update_google_sheet_with_tweets(accounts):
         print("No tweet data was gathered. Review the Scraper Logs above to see why X blocked the extraction.")
         return
 
-    # Sort the global pool of extracted tweets by Date, newest first (Descending)
     all_extracted_tweets.sort(key=lambda x: x[0], reverse=True)
-
-    # Extract just the sanitized text back into a list format for Google Sheets
     all_rows_to_write = [[t[1]] for t in all_extracted_tweets]
 
-    # 3. Connect and update Google Sheet using oauth2client with 10 max retries
+    # 3. Connect and update Google Sheet
     max_retries = 10
     for attempt in range(max_retries):
         try:
@@ -532,7 +541,6 @@ def update_google_sheet_with_tweets(accounts):
                 "https://www.googleapis.com/auth/drive"
             ]
 
-            # Use GCP Github Secrets when available
             gcp_credentials_json = os.environ.get("GCP_CREDENTIALS")
             if gcp_credentials_json:
                 creds_dict = json.loads(gcp_credentials_json)
@@ -543,7 +551,6 @@ def update_google_sheet_with_tweets(accounts):
             gc = gspread.authorize(creds)
             sh = gc.open_by_key(SPREADSHEET_ID)
 
-            # Connect to or create the "News" worksheet
             worksheet = None
             try:
                 worksheet = sh.worksheet("News")
@@ -557,22 +564,19 @@ def update_google_sheet_with_tweets(accounts):
             print(f"Writing {len(all_rows_to_write)} records to worksheet '{worksheet.title}'...")
             worksheet.update(range_name='A1', values=all_rows_to_write)
 
-            # --- Polish spreadsheet layout and formatting ---
             print("Applying clean table formatting and auto-resizing columns...")
             try:
-                # Enable word wrapping on Column A (the formatted tweet column)
                 worksheet.format('A:A', {'wrapStrategy': 'WRAP'})
             except Exception as format_err:
                 print(f"Word wrapping failed: {format_err}")
 
             try:
-                # Automatically resize Column A so no text is cut off
                 worksheet.columns_auto_resize(0, 1)
             except Exception as resize_err:
                 print(f"Auto-resizing failed: {resize_err}")
 
             print("News sheet updated successfully.")
-            break  # Exit the loop on success
+            break 
 
         except Exception as e:
             error_message = str(e)
@@ -587,23 +591,15 @@ def update_google_sheet_with_tweets(accounts):
                 break
 
 if __name__ == "__main__":
-    # Define the accounts to scrape (exactly 5 tweets each will be displayed, without author prefixes)
     accounts = [
         {"username": "Reuters", "display_name": "Reuters"},
         {"username": "AP", "display_name": "The Associated Press"},
         {"username": "AJENews", "display_name": "Al Jazeera Breaking News"}
     ]
 
-    # Generate config.ini for the scraper using environment variables
     ensure_config_file(max_tweets=15)
-    
-    # 1. Ensure codebase is patched to support multiple modal designs and "Continue" buttons
     patch_scraper_source()
-
-    # 2. Automatically clean, structure, and sanitize user cookies before scraping runs
     clean_and_move_cookies()
-
-    # 3. Execute the scraping process for all targeted accounts
     success = scrape_all_accounts(accounts)
     
     if success:
