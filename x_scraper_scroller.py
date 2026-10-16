@@ -6,6 +6,11 @@ import re
 import subprocess
 import shutil
 import time
+import random
+import ssl
+import urllib.request
+import xml.etree.ElementTree as ET
+import html
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from email.utils import parsedate_to_datetime
@@ -343,32 +348,40 @@ def find_scraped_file(username):
 
 def fetch_content_robust(url):
     """
-    Fetches URL content aggressively bypassing 403 Cloudflare blocks.
-    Falls back to OS-level cURL if Python's urllib TLS footprint gets blocked.
+    Fetches URL content aggressively bypassing Cloudflare blocks and Rate Limits.
+    Accepts compressed encoding to prevent WAF bot triggers and falls back to system cURL.
     """
-    import urllib.request
+    uas = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    ]
+    ua = random.choice(uas)
+    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': ua,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
         'Upgrade-Insecure-Requests': '1'
     }
     
-    # Method 1: Standard Urllib (Works on basic protections)
+    # Disable SSL verification to prevent failures on flaky instances
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as r:
+        with urllib.request.urlopen(req, context=ctx, timeout=12) as r:
             return r.read().decode('utf-8', errors='ignore')
     except Exception:
-        # Method 2: System cURL (Bypasses Python TLS fingerprinting completely)
+        # Fallback to system cURL (handles compression natively, bypasses pure python bans)
         try:
             cmd = [
-                "curl", "-sL", 
+                "curl", "-sL", "-k", "--compressed",
                 "--max-time", "12",
-                "-A", headers["User-Agent"],
+                "-A", ua,
                 "-H", f"Accept: {headers['Accept']}",
                 "-H", f"Accept-Language: {headers['Accept-Language']}",
                 url
@@ -378,6 +391,7 @@ def fetch_content_robust(url):
                 return result.stdout
         except Exception:
             pass
+            
     return ""
 
 def update_google_sheet_with_tweets(accounts):
@@ -401,15 +415,22 @@ def update_google_sheet_with_tweets(accounts):
         # --- ROBUST UNIVERSAL FALLBACK ROUTING ---
         if not tweets:
             print(f"No tweets found in the exported JSON file for {username}. Attempting Universal Fallback routing...")
-            import xml.etree.ElementTree as ET
-            import html
             
-            fallback_urls = [
-                f"https://api.sotwe.com/v3/user/{username}",
+            # Diverse Nitter instances & hubs, shuffled randomly per account to prevent burst IP bans
+            nitter_urls = [
                 f"https://xcancel.com/{username}/rss",
                 f"https://nitter.privacydev.net/{username}/rss",
                 f"https://nitter.poast.org/{username}/rss",
+                f"https://nitter.ktachibana.party/{username}/rss",
+                f"https://nitter.rawbit.ninja/{username}/rss"
+            ]
+            random.shuffle(nitter_urls)
+            
+            fallback_urls = [
                 f"https://twiiit.com/{username}/rss",
+                f"https://api.sotwe.com/v3/user/{username}",
+            ] + nitter_urls + [
+                f"https://rsshub.app/twitter/user/{username}",
                 f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
             ]
             
@@ -418,6 +439,7 @@ def update_google_sheet_with_tweets(accounts):
                 content = fetch_content_robust(url)
                 
                 if not content:
+                    time.sleep(2)
                     continue
                     
                 # 1. Parse Sotwe JSON feed
@@ -445,7 +467,7 @@ def update_google_sheet_with_tweets(accounts):
                     except Exception:
                         pass
                 
-                # 2. Parse Nitter/XCancel RSS Feeds
+                # 2. Parse Nitter/XCancel/RSSHub Feeds
                 elif "<rss" in content or "<feed" in content:
                     try:
                         root = ET.fromstring(content)
@@ -502,6 +524,9 @@ def update_google_sheet_with_tweets(accounts):
                                 break
                     except Exception:
                         pass
+                
+                # Small cool-down so we don't burst the next domain in the list
+                time.sleep(2)
             
             if tweets:
                 # Deduplicate identically matching fallback texts
@@ -518,6 +543,7 @@ def update_google_sheet_with_tweets(accounts):
 
         if not tweets:
             print(f"No tweets found via Scraper or Fallbacks for {username}.")
+            time.sleep(3) # Throttle down before trying the next account
             continue
 
         count = 0
@@ -586,6 +612,8 @@ def update_google_sheet_with_tweets(accounts):
 
             all_extracted_tweets.append((parsed_date, content))
             count += 1
+            
+        time.sleep(3) # Gentle 3 second delay before the next account
 
     if not all_extracted_tweets:
         print("No tweet data was gathered. Review the Scraper Logs above to see why X blocked the extraction.")
