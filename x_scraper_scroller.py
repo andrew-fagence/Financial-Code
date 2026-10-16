@@ -60,7 +60,6 @@ def clean_and_move_cookies():
     root_path = "./playwright_cookies.json"
     repo_cookies_path = "./x-scraper/playwright_cookies.json"
 
-    # 1. Check if the user uploaded the file to the root folder
     if os.path.exists(root_path):
         print(f"Found cookie file at root: {root_path}. Moving to scraper folder...")
         try:
@@ -68,14 +67,12 @@ def clean_and_move_cookies():
         except Exception as e:
             print(f"Failed to copy cookie file: {e}")
 
-    # 2. Process and sanitize the cookie file if it exists in the target path
     if os.path.exists(repo_cookies_path):
         print(f"Sanitizing cookies inside {repo_cookies_path} to prevent sameSite validation errors...")
         try:
             with open(repo_cookies_path, 'r', encoding='utf-8') as f:
                 cookies = json.load(f)
 
-            # Wrap in a list if it's a single dictionary
             if isinstance(cookies, dict):
                 cookies = [cookies]
 
@@ -88,16 +85,13 @@ def clean_and_move_cookies():
                     continue
 
                 cleaned_cookie = {}
-
-                # Copy required fields
                 if 'name' in cookie:
                     cleaned_cookie['name'] = str(cookie['name'])
                 if 'value' in cookie:
                     cleaned_cookie['value'] = str(cookie['value'])
                 else:
-                    continue  # Skip invalid cookies without values
+                    continue  
 
-                # Copy standard optional fields & force domain transition
                 if 'domain' in cookie:
                     domain = str(cookie['domain'])
                     if 'twitter.com' in domain:
@@ -109,30 +103,26 @@ def clean_and_move_cookies():
                 if 'secure' in cookie:
                     cleaned_cookie['secure'] = bool(cookie['secure'])
                 else:
-                    cleaned_cookie['secure'] = True  # Default to secure
+                    cleaned_cookie['secure'] = True  
                     
                 if 'httpOnly' in cookie:
                     cleaned_cookie['httpOnly'] = bool(cookie['httpOnly'])
 
-                # Handle expires conversion
                 if 'expires' in cookie:
                     cleaned_cookie['expires'] = cookie['expires']
                 elif 'expirationDate' in cookie:
                     cleaned_cookie['expires'] = cookie['expirationDate']
 
-                # Fix sameSite validation strictly
                 if 'sameSite' in cookie:
                     s_val = cookie['sameSite']
                     if s_val is not None:
                         s_str = str(s_val).strip()
-                        s_capitalized = s_str.capitalize()  # "lax" -> "Lax", "none" -> "None"
+                        s_capitalized = s_str.capitalize()  
 
                         if s_capitalized in valid_samesite_values:
                             cleaned_cookie['sameSite'] = s_capitalized
                         elif s_str.lower() in ["no_restriction", "unspecified"]:
                             cleaned_cookie['sameSite'] = "None"
-                        else:
-                            pass
                 
                 if cleaned_cookie.get('sameSite') == 'None':
                     cleaned_cookie['secure'] = True
@@ -166,7 +156,6 @@ def patch_scraper_source():
         with open(file_path, 'r', encoding='utf-8') as f:
             code = f.read()
 
-        # --- 1. UI SELECTOR PATCHES ---
         code = code.replace('input[autocomplete="username"]', 'input[autocomplete="username"], input[name="text"], input[placeholder*="username" i], input[placeholder*="Email" i]')
         code = code.replace('"text=Next"', '"text=/Next|Continue/i"')
         code = code.replace("'text=Next'", "'text=/Next|Continue/i'")
@@ -178,7 +167,6 @@ def patch_scraper_source():
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(code)
 
-        # --- 2. THE OMNI-INTERCEPTOR MONKEY PATCH ---
         monkey_patch = """
 # --- THE ULTIMATE INTERCEPTOR PATCH ---
 import time
@@ -333,10 +321,6 @@ def scrape_all_accounts(accounts):
     return success_count > 0
 
 def find_scraped_file(username):
-    """
-    Robustly looks for the scraper output file directly for a specific username,
-    then falls back to a recursive search inside the scraper data directory.
-    """
     direct_paths = [
         f"./x-scraper/data/{username}/tweets_{username}.json",
         f"./x-scraper/data/{username.lower()}/tweets_{username.lower()}.json",
@@ -357,6 +341,45 @@ def find_scraped_file(username):
 
     return None
 
+def fetch_content_robust(url):
+    """
+    Fetches URL content aggressively bypassing 403 Cloudflare blocks.
+    Falls back to OS-level cURL if Python's urllib TLS footprint gets blocked.
+    """
+    import urllib.request
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Upgrade-Insecure-Requests': '1'
+    }
+    
+    # Method 1: Standard Urllib (Works on basic protections)
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as r:
+            return r.read().decode('utf-8', errors='ignore')
+    except Exception:
+        # Method 2: System cURL (Bypasses Python TLS fingerprinting completely)
+        try:
+            cmd = [
+                "curl", "-sL", 
+                "--max-time", "12",
+                "-A", headers["User-Agent"],
+                "-H", f"Accept: {headers['Accept']}",
+                "-H", f"Accept-Language: {headers['Accept-Language']}",
+                url
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout:
+                return result.stdout
+        except Exception:
+            pass
+    return ""
+
 def update_google_sheet_with_tweets(accounts):
     all_extracted_tweets = []  
 
@@ -375,104 +398,126 @@ def update_google_sheet_with_tweets(accounts):
 
         tweets = data.get("tweets", [])
         
-        # --- ROBUST EXTERNAL API FALLBACK LOGIC ---
+        # --- ROBUST UNIVERSAL FALLBACK ROUTING ---
         if not tweets:
-            print(f"No tweets found in the exported JSON file for {username}. Attempting Fallback routing...")
-            try:
-                import urllib.request
-                import xml.etree.ElementTree as ET
-                import html
+            print(f"No tweets found in the exported JSON file for {username}. Attempting Universal Fallback routing...")
+            import xml.etree.ElementTree as ET
+            import html
+            
+            fallback_urls = [
+                f"https://api.sotwe.com/v3/user/{username}",
+                f"https://xcancel.com/{username}/rss",
+                f"https://nitter.privacydev.net/{username}/rss",
+                f"https://nitter.poast.org/{username}/rss",
+                f"https://twiiit.com/{username}/rss",
+                f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
+            ]
+            
+            for url in fallback_urls:
+                print(f"  -> Bypassing via {url}...")
+                content = fetch_content_robust(url)
                 
-                # Method 1: Sotwe API Engine (Fastest JSON API bypass)
-                try:
-                    print(f"  -> Connecting to Sotwe API for {username}...")
-                    sotwe_url = f"https://api.sotwe.com/v3/user/{username}"
-                    req = urllib.request.Request(sotwe_url, headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'application/json'
-                    })
-                    with urllib.request.urlopen(req, timeout=15) as response:
-                        sotwe_data = json.loads(response.read().decode('utf-8'))
-                        
-                    def extract_sotwe_tweets(obj):
-                        if isinstance(obj, dict):
-                            if ('text' in obj or 'full_text' in obj) and ('id' in obj or 'id_str' in obj):
-                                author = obj.get('user', {}).get('screen_name', '')
-                                if not author or author.lower() == username.lower():
-                                    tweets.append({
-                                        'text': obj.get('full_text') or obj.get('text', ''),
-                                        'created_at': obj.get('createdAt') or obj.get('created_at', '')
-                                    })
-                            for k, v in obj.items():
-                                extract_sotwe_tweets(v)
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                extract_sotwe_tweets(item)
-
-                    extract_sotwe_tweets(sotwe_data)
-                except Exception as e:
-                    print(f"     Sotwe API skipped due to error: {e}")
-
-                # Method 2: Twiiit Nitter RSS Rotator (If Sotwe fails, parses XML timeline)
-                if not tweets:
-                    print(f"  -> Connecting to Twiiit RSS Rotator for {username}...")
-                    target_url = f"https://twiiit.com/{username}/rss"
-                    req = urllib.request.Request(target_url, headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                        'Accept': 'application/rss+xml, application/xml, text/xml'
-                    })
+                if not content:
+                    continue
                     
-                    with urllib.request.urlopen(req, timeout=20) as response:
-                        xml_data = response.read().decode('utf-8')
-                        
-                    root = ET.fromstring(xml_data)
-                    
-                    for item in root.findall('./channel/item'):
-                        # Filter retweets from Nitter RSS cleanly
-                        creator = item.find('{http://purl.org/dc/elements/1.1/}creator')
-                        author = creator.text if creator is not None else ""
-                        if author and author.strip('@').lower() != username.lower():
-                            continue 
+                # 1. Parse Sotwe JSON feed
+                if url.startswith("https://api.sotwe.com") and "createdAt" in content:
+                    try:
+                        sotwe_data = json.loads(content)
+                        def extract_sotwe_tweets(obj):
+                            if isinstance(obj, dict):
+                                if ('text' in obj or 'full_text' in obj) and ('id' in obj or 'id_str' in obj):
+                                    author = obj.get('user', {}).get('screen_name', '')
+                                    if not author or author.lower() == username.lower():
+                                        tweets.append({
+                                            'text': obj.get('full_text') or obj.get('text', ''),
+                                            'created_at': obj.get('createdAt') or obj.get('created_at', '')
+                                        })
+                                for k, v in obj.items():
+                                    extract_sotwe_tweets(v)
+                            elif isinstance(obj, list):
+                                for item in obj:
+                                    extract_sotwe_tweets(item)
+                        extract_sotwe_tweets(sotwe_data)
+                        if tweets:
+                            print(f"     Success! Bypassed firewall using Sotwe API.")
+                            break
+                    except Exception:
+                        pass
+                
+                # 2. Parse Nitter/XCancel RSS Feeds
+                elif "<rss" in content or "<feed" in content:
+                    try:
+                        root = ET.fromstring(content)
+                        for item in root.findall('.//item'):
+                            creator = item.find('{http://purl.org/dc/elements/1.1/}creator')
+                            author = creator.text if creator is not None else ""
+                            if author and author.strip('@').lower() != username.lower():
+                                continue 
+                                
+                            desc = item.find('description')
+                            title = item.find('title')
+                            pubDate = item.find('pubDate')
                             
-                        desc = item.find('description')
-                        title = item.find('title')
-                        pubDate = item.find('pubDate')
-                        
-                        # Description contains the full post content without javascript logic applied
-                        if desc is not None and desc.text:
-                            text_no_tags = re.sub(r'<[^>]+>', ' ', desc.text)
-                            text = html.unescape(text_no_tags).strip()
-                        elif title is not None and title.text:
-                            text = title.text.strip()
-                        else:
-                            continue
+                            if desc is not None and desc.text:
+                                text_no_tags = re.sub(r'<[^>]+>', ' ', desc.text)
+                                text = html.unescape(text_no_tags).strip()
+                            elif title is not None and title.text:
+                                text = title.text.strip()
+                            else:
+                                continue
+                                
+                            date_val = pubDate.text if pubDate is not None else ""
+                            tweets.append({'text': text, 'created_at': date_val})
                             
-                        date_val = pubDate.text if pubDate is not None else ""
+                        if tweets:
+                            print(f"     Success! Bypassed firewall using RSS Feeds.")
+                            break
+                    except Exception:
+                        pass
                         
-                        tweets.append({
-                            'text': text,
-                            'created_at': date_val
-                        })
-
-                if tweets:
-                    # Deduplicate uniquely parsed fallback texts
-                    seen_texts = set()
-                    unique_tweets = []
-                    for t in tweets:
-                        if t['text'] not in seen_texts:
-                            seen_texts.add(t['text'])
-                            unique_tweets.append(t)
-                    tweets = unique_tweets
-                    print(f"Successfully retrieved {len(tweets)} tweets via external fallback engines for {username}!")
-                else:
-                    print(f"All external fallback engines failed for {username}.")
-
-            except Exception as e:
-                print(f"Fallback encountered a critical error for {username}: {e}")
-        # --- END EXTERNAL API FALLBACK LOGIC ---
+                # 3. Parse Syndication Fallback API
+                elif "__NEXT_DATA__" in content:
+                    try:
+                        match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', content)
+                        if match:
+                            syndication_data = json.loads(match.group(1))
+                            def extract_syndication_tweets(obj):
+                                if isinstance(obj, dict):
+                                    if 'text' in obj and 'created_at' in obj and 'id_str' in obj:
+                                        author = obj.get('user', {}).get('screen_name', '')
+                                        if not author or author.lower() == username.lower():
+                                            tweets.append({
+                                                'text': obj.get('full_text') or obj.get('text', ''),
+                                                'created_at': obj.get('created_at', '')
+                                            })
+                                    for k, v in obj.items():
+                                        extract_syndication_tweets(v)
+                                elif isinstance(obj, list):
+                                    for item in obj:
+                                        extract_syndication_tweets(item)
+                            extract_syndication_tweets(syndication_data)
+                            if tweets:
+                                print(f"     Success! Bypassed firewall using Syndication API.")
+                                break
+                    except Exception:
+                        pass
+            
+            if tweets:
+                # Deduplicate identically matching fallback texts
+                seen_texts = set()
+                unique_tweets = []
+                for t in tweets:
+                    if t['text'] not in seen_texts:
+                        seen_texts.add(t['text'])
+                        unique_tweets.append(t)
+                tweets = unique_tweets
+                print(f"Successfully retrieved {len(tweets)} distinct tweets for {username}!")
+            else:
+                print(f"All universal fallback engines failed or timed out for {username}.")
 
         if not tweets:
-            print(f"No tweets found via Scraper or API Fallbacks for {username}.")
+            print(f"No tweets found via Scraper or Fallbacks for {username}.")
             continue
 
         count = 0
