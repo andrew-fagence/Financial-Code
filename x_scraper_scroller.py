@@ -375,87 +375,104 @@ def update_google_sheet_with_tweets(accounts):
 
         tweets = data.get("tweets", [])
         
-        # --- ROBUST SYNDICATION FALLBACK LOGIC WITH PROXY ROTATION ---
+        # --- ROBUST EXTERNAL API FALLBACK LOGIC ---
         if not tweets:
-            print(f"No tweets found in the exported JSON file for {username}. Attempting Syndication API fallback via proxy rotators...")
+            print(f"No tweets found in the exported JSON file for {username}. Attempting Fallback routing...")
             try:
                 import urllib.request
-                import urllib.parse
+                import xml.etree.ElementTree as ET
+                import html
                 
-                base_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
-                
-                # A list of free public proxies to instantly bypass GitHub Actions IP bans (429)
-                proxy_services = [
-                    "",  # 1. Direct Connection (try first)
-                    "https://api.codetabs.com/v1/proxy?quest=",  # 2. CodeTabs Open Proxy
-                    "https://api.allorigins.win/raw?url="  # 3. AllOrigins CORS Proxy
-                ]
-                
-                html = None
-                for proxy in proxy_services:
-                    try:
-                        # Some proxies require the target URL to be perfectly URL-encoded
-                        if "allorigins" in proxy:
-                            target_url = proxy + urllib.parse.quote(base_url)
+                # Method 1: Sotwe API Engine (Fastest JSON API bypass)
+                try:
+                    print(f"  -> Connecting to Sotwe API for {username}...")
+                    sotwe_url = f"https://api.sotwe.com/v3/user/{username}"
+                    req = urllib.request.Request(sotwe_url, headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/json'
+                    })
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        sotwe_data = json.loads(response.read().decode('utf-8'))
+                        
+                    def extract_sotwe_tweets(obj):
+                        if isinstance(obj, dict):
+                            if ('text' in obj or 'full_text' in obj) and ('id' in obj or 'id_str' in obj):
+                                author = obj.get('user', {}).get('screen_name', '')
+                                if not author or author.lower() == username.lower():
+                                    tweets.append({
+                                        'text': obj.get('full_text') or obj.get('text', ''),
+                                        'created_at': obj.get('createdAt') or obj.get('created_at', '')
+                                    })
+                            for k, v in obj.items():
+                                extract_sotwe_tweets(v)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                extract_sotwe_tweets(item)
+
+                    extract_sotwe_tweets(sotwe_data)
+                except Exception as e:
+                    print(f"     Sotwe API skipped due to error: {e}")
+
+                # Method 2: Twiiit Nitter RSS Rotator (If Sotwe fails, parses XML timeline)
+                if not tweets:
+                    print(f"  -> Connecting to Twiiit RSS Rotator for {username}...")
+                    target_url = f"https://twiiit.com/{username}/rss"
+                    req = urllib.request.Request(target_url, headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                        'Accept': 'application/rss+xml, application/xml, text/xml'
+                    })
+                    
+                    with urllib.request.urlopen(req, timeout=20) as response:
+                        xml_data = response.read().decode('utf-8')
+                        
+                    root = ET.fromstring(xml_data)
+                    
+                    for item in root.findall('./channel/item'):
+                        # Filter retweets from Nitter RSS cleanly
+                        creator = item.find('{http://purl.org/dc/elements/1.1/}creator')
+                        author = creator.text if creator is not None else ""
+                        if author and author.strip('@').lower() != username.lower():
+                            continue 
+                            
+                        desc = item.find('description')
+                        title = item.find('title')
+                        pubDate = item.find('pubDate')
+                        
+                        # Description contains the full post content without javascript logic applied
+                        if desc is not None and desc.text:
+                            text_no_tags = re.sub(r'<[^>]+>', ' ', desc.text)
+                            text = html.unescape(text_no_tags).strip()
+                        elif title is not None and title.text:
+                            text = title.text.strip()
                         else:
-                            target_url = proxy + base_url
+                            continue
                             
-                        req = urllib.request.Request(target_url, headers={
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                        date_val = pubDate.text if pubDate is not None else ""
+                        
+                        tweets.append({
+                            'text': text,
+                            'created_at': date_val
                         })
-                        
-                        with urllib.request.urlopen(req, timeout=15) as response:
-                            response_text = response.read().decode('utf-8')
-                            
-                            # A successful connection to Twitter returns the __NEXT_DATA__ JSON payload
-                            if '__NEXT_DATA__' in response_text:
-                                html = response_text
-                                connection_type = 'Proxy Wrapper' if proxy else 'Direct Connection'
-                                print(f"Successfully connected to Syndication API via {connection_type}.")
-                                break
-                    except Exception as proxy_err:
-                        continue  # Silently skip to the next proxy node
-                
-                if html:
-                    match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.+?)</script>', html)
-                    if match:
-                        syndication_data = json.loads(match.group(1))
-                        
-                        def extract_syndication_tweets(obj):
-                            if isinstance(obj, dict):
-                                if 'text' in obj and 'created_at' in obj and 'id_str' in obj:
-                                    author = obj.get('user', {}).get('screen_name', '')
-                                    if not author or author.lower() == username.lower():
-                                        tweets.append({
-                                            'text': obj.get('full_text') or obj.get('text', ''),
-                                            'created_at': obj.get('created_at', '')
-                                        })
-                                for k, v in obj.items():
-                                    extract_syndication_tweets(v)
-                            elif isinstance(obj, list):
-                                for item in obj:
-                                    extract_syndication_tweets(item)
-                                    
-                        extract_syndication_tweets(syndication_data)
-                        
-                        if tweets:
-                            seen_texts = set()
-                            unique_tweets = []
-                            for t in tweets:
-                                if t['text'] not in seen_texts:
-                                    seen_texts.add(t['text'])
-                                    unique_tweets.append(t)
-                            tweets = unique_tweets
-                            print(f"Successfully retrieved {len(tweets)} tweets via Syndication fallback for {username}!")
+
+                if tweets:
+                    # Deduplicate uniquely parsed fallback texts
+                    seen_texts = set()
+                    unique_tweets = []
+                    for t in tweets:
+                        if t['text'] not in seen_texts:
+                            seen_texts.add(t['text'])
+                            unique_tweets.append(t)
+                    tweets = unique_tweets
+                    print(f"Successfully retrieved {len(tweets)} tweets via external fallback engines for {username}!")
                 else:
-                    print(f"All Syndication endpoints (including proxy rotators) failed to bypass the 429 rate limit for {username}.")
+                    print(f"All external fallback engines failed for {username}.")
+
             except Exception as e:
-                print(f"Syndication fallback encountered a critical error for {username}: {e}")
-        # --- END FALLBACK LOGIC ---
+                print(f"Fallback encountered a critical error for {username}: {e}")
+        # --- END EXTERNAL API FALLBACK LOGIC ---
 
         if not tweets:
-            print(f"No tweets found via Scraper or Proxy Fallbacks for {username}.")
+            print(f"No tweets found via Scraper or API Fallbacks for {username}.")
             continue
 
         count = 0
