@@ -92,7 +92,7 @@ def get_ai_summary(client: genai.Client, bank_name: str, rate: float, outlook_co
     prompt = (
         f"The current central bank interest rate for the {bank_name} is {rate}%. "
         f"Current Forward Outlook Signal: {outlook_context}. "
-        "Based on this explicit guidance, write a strict 15-word maximum sentiment summary."
+        "Based on this explicit guidance, write a strict 15-word maximum sentiment summary. Do not include any asterisk symbols in the output."
     )
     
     for attempt in range(10):
