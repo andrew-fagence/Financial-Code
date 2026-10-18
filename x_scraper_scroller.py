@@ -410,6 +410,9 @@ def update_google_sheet_with_tweets(accounts):
             
             # Match the whole sentence containing BOTH "reuters" and "podcast" and remove it completely
             content = re.sub(r"[^.!?\n]*(?:reuters[^.!?\n]*podcast|podcast[^.!?\n]*reuters)[^.!?\n]*[.!?\n]*", "", content, flags=re.IGNORECASE)
+
+            # Match the whole sentence containing "watch/listen" or "listen/watch" and remove it completely
+            content = re.sub(r"[^.!?\n]*(?:watch/listen|listen/watch)[^.!?\n]*[.!?\n]*", "", content, flags=re.IGNORECASE)
             
             # Remove all URLs (this naturally catches the URLs at the end of the tweet)
             content = re.sub(r"https?://\S+|www\.\S+", "", content)
