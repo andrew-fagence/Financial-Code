@@ -394,11 +394,19 @@ print("\nJapan Real GDP prepared for batch update successfully")
 # =============================================================================
 print("\nFetching Japan Retail Sales from FRED...")
 try:
+    try:
+        from curl_cffi import requests as cffi_requests
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
+        from curl_cffi import requests as cffi_requests
+
     # JPNSLRTTO02IXOBSAM is Total Retail Trade Value for Japan (Index, Seasonally Adjusted)
-    # Fetching directly via the open graph CSV export prevents any WAF blocking
     fred_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=JPNSLRTTO02IXOBSAM"
-    r = session.get(fred_url, headers=HEADERS, timeout=60)
-    r.raise_for_status()
+    # Use curl_cffi to bypass GitHub Actions IP blocks by FRED (Cloudflare/WAF)
+    r = cffi_requests.get(fred_url, impersonate="chrome120", timeout=60)
+    
+    if r.status_code != 200:
+        raise Exception(f"HTTP {r.status_code}: {r.text}")
     
     df_retail = pd.read_csv(StringIO(r.text), parse_dates=["DATE"])
     df_retail.columns = ["date", "retail"]
@@ -729,10 +737,18 @@ print("\nJapan Unemployment Rate prepared for batch update successfully")
 # =============================================================================
 print("\nFetching Japan Labour Force Participation Rate from FRED...")
 try:
+    try:
+        from curl_cffi import requests as cffi_requests
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
+        from curl_cffi import requests as cffi_requests
+
     # LRAC64TTJPM156S is LFPR for Japan (15 to 64 Years, Total, Seasonally Adjusted)
     fred_lfpr_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=LRAC64TTJPM156S"
-    r = session.get(fred_lfpr_url, headers=HEADERS, timeout=60)
-    r.raise_for_status()
+    r = cffi_requests.get(fred_lfpr_url, impersonate="chrome120", timeout=60)
+    
+    if r.status_code != 200:
+        raise Exception(f"HTTP {r.status_code}: {r.text}")
     
     df_lfpr = pd.read_csv(StringIO(r.text), parse_dates=["DATE"])
     df_lfpr.columns = ["date", "lfpr"]
@@ -771,6 +787,7 @@ all_batch_updates.extend([
     {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
 ])
 print("\nJapan Labour Force Participation Rate prepared for batch update successfully")
+
 
 # =============================================================================
 # JAPAN AVERAGE HOURLY EARNINGS
