@@ -14,6 +14,7 @@ import urllib.parse
 import subprocess
 import sys
 import ssl
+import unicodedata
 
 # Suppress warnings for cleaner execution output 
 warnings.filterwarnings('ignore')
@@ -399,7 +400,6 @@ try:
     print("Attempting E-Stat Dynamic API...")
     APP_ID = "b0bc8765e50cb21888f0bfc4aa3189a2aab22ae7"
     
-    # Dynamically search E-Stat to avoid hardcoded IDs that change
     search_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsList?appId={APP_ID}&searchWord=商業動態統計&lang=J"
     r_search = session.get(search_url, headers=HEADERS, timeout=60)
     r_search.raise_for_status()
@@ -427,13 +427,14 @@ try:
             
     if not target_id:
         raise Exception("Could not dynamically find the statsDataId for Retail Sales in E-Stat.")
-        
-    data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
-    r_data = session.get(data_url, headers=HEADERS, timeout=60)
-    r_data.raise_for_status()
-    data = r_data.json()
+
+    # 1. Fetch METADATA to discover the specific Server-Side filter parameter for Retail Sales (e.g. cdCat01)
+    meta_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getMetaInfo?appId={APP_ID}&statsDataId={target_id}&lang=J"
+    r_meta = session.get(meta_url, headers=HEADERS, timeout=60)
+    r_meta.raise_for_status()
+    meta_data = r_meta.json()
     
-    class_objs = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("CLASS_INF", {}).get("CLASS_OBJ", [])
+    class_objs = meta_data.get("GET_META_INFO", {}).get("METADATA_INF", {}).get("CLASS_INF", {}).get("CLASS_OBJ", [])
     if isinstance(class_objs, dict): class_objs = [class_objs]
         
     retail_code, cat_id = None, None
@@ -445,22 +446,32 @@ try:
         for cls in classes:
             if not isinstance(cls, dict): continue
             name = extract_text(cls.get("@name", ""))
-            # Broad search for the retail sales category inside E-Stat payload
             if "小売業" in name and not any(x in name for x in ["自動車", "機械", "燃料"]):
                 retail_code = cls.get("@code")
                 cat_id = c_id
                 break
         if retail_code: break
-            
-    if not retail_code:
-        raise Exception("Could not find '小売業' category code in E-Stat dataset.")
+
+    if not retail_code or not cat_id:
+        raise Exception("Could not find '小売業' category code in E-Stat metadata.")
+
+    # 2. Fetch DATA with the explicit filter appended. This prevents the E-Stat 100,000 row truncation!
+    filter_param = f"cd{cat_id.capitalize()}" if cat_id else ""
+    data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
+    if filter_param:
+        data_url += f"&{filter_param}={retail_code}"
         
+    r_data = session.get(data_url, headers=HEADERS, timeout=60)
+    r_data.raise_for_status()
+    data = r_data.json()
+    
     values = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("DATA_INF", {}).get("VALUE", [])
     if not isinstance(values, list): values = [values] if values else []
         
     rows = []
     for v in values:
         if not isinstance(v, dict): continue
+        # Validating safety just in case other categories bled through
         if v.get(f"@{cat_id}") == retail_code:
             t_str = str(v.get("@time", ""))
             if len(t_str) >= 6:
@@ -480,9 +491,8 @@ try:
 except Exception as e:
     print(f"E-Stat method failed: {e}. Falling back to DB.nomics API...")
     try:
-        # OECD MEI dataset for Japan Total Retail Trade Value - DB.nomics REST API
-        # ?observations=1 is required to actually return the period and value arrays
-        nomics_url = "https://api.db.nomics.world/v22/series/OECD/MEI/JPN.SLRTTO02.IXOBSA.M?observations=1"
+        # OECD MEI dataset for Japan Total Retail Trade Volume - DB.nomics REST API
+        nomics_url = "https://api.db.nomics.world/v22/series/OECD/MEI/JPN.SLRTTO01.IXOBSA.M?observations=1"
         r_nomics = session.get(nomics_url, headers=HEADERS, timeout=60)
         r_nomics.raise_for_status()
         
@@ -816,34 +826,47 @@ print("\nJapan Unemployment Rate prepared for batch update successfully")
 # =============================================================================
 print("\nFetching Japan Labour Force Participation Rate from E-Stat...")
 try:
-    lfpr_col = None
+    pop_col, lf_col, lfpr_col = 2, 3, None
     
-    # Locate the LFPR column from the exact same Labour Force survey fetched moments ago
+    # Locate exact column index gracefully utilizing NFKC normalization for fullwidth/halfwidth
     for c in range(raw_lfs.shape[1]):
-        col_texts = "".join(str(x) for x in raw_lfs.iloc[0:15, c] if pd.notna(x)).replace(" ", "").replace("\n", "")
-        if "労働力率" in col_texts:
+        col_texts = "".join(str(x) for x in raw_lfs.iloc[0:15, c] if pd.notna(x))
+        col_texts = unicodedata.normalize('NFKC', col_texts).replace(" ", "").replace("\n", "")
+        
+        if "労働力率" in col_texts or "労働力人口比率" in col_texts:
             lfpr_col = c
-            break
+        elif "15歳以上人口" in col_texts:
+            pop_col = c
+        elif "労働力人口" in col_texts and c != pop_col:
+            lf_col = c
 
     rows = []
+    current_year = None
+    
     for i in range(10, len(raw_lfs)):
-        y_val = number(raw_lfs.iloc[i, 0])
-        if y_val is None or not (1950 <= y_val <= 2030):
+        y_raw = number(raw_lfs.iloc[i, 0])
+        # Crucial fix: Excel only contains the Year in January. We must track it downwards manually.
+        if y_raw is not None and 1950 <= y_raw <= 2030:
+            current_year = int(y_raw)
+            
+        if current_year is None:
             continue
+            
         m_val = number(raw_lfs.iloc[i, 1])
         if m_val is None or not (1 <= m_val <= 12):
             continue
             
+        val = None
         if lfpr_col is not None:
             val = number(raw_lfs.iloc[i, lfpr_col])
-        else:
-            # Fallback to direct calculation (Labour Force / Population 15+ * 100)
-            pop = number(raw_lfs.iloc[i, 2])
-            lf = number(raw_lfs.iloc[i, 3])
-            val = (lf / pop * 100) if pop and lf else None
-            
+        elif pop_col is not None and lf_col is not None:
+            pop = number(raw_lfs.iloc[i, pop_col])
+            lf = number(raw_lfs.iloc[i, lf_col])
+            if pop and lf:
+                val = (lf / pop) * 100
+                
         if val is not None:
-            rows.append([pd.Timestamp(int(y_val), int(m_val), 1), val])
+            rows.append([pd.Timestamp(current_year, int(m_val), 1), val])
             
     df_lfpr = pd.DataFrame(rows, columns=["date", "lfpr"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
     if len(df_lfpr) < 15:
