@@ -394,80 +394,141 @@ print("\nJapan Real GDP prepared for batch update successfully")
 # =============================================================================
 print("\nFetching Japan Retail Sales from Trading Economics...")
 
-def get_te_data(url):
+def get_te_data(url, indicator_name_api):
+    # 1. API Attempt (Works perfectly for select public indicators)
+    api_url = f"https://api.tradingeconomics.com/historical/country/japan/indicator/{urllib.parse.quote(indicator_name_api)}?c=guest:guest&f=json"
+    try:
+        r = session.get(api_url, headers=HEADERS, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0:
+                rows = []
+                for pt in data:
+                    dt_str = pt.get("DateTime") or pt.get("Date")
+                    val = pt.get("Value")
+                    if dt_str and val is not None:
+                        dt = pd.to_datetime(dt_str).replace(day=1).normalize()
+                        rows.append([dt, float(val)])
+                df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
+                if len(df) >= 3:
+                    return df
+    except Exception:
+        pass
+
+    # 2. Scraping Attempt Fallback
     try:
         from curl_cffi import requests as cffi_requests
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
         from curl_cffi import requests as cffi_requests
-    try:
-        from bs4 import BeautifulSoup
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
-        from bs4 import BeautifulSoup
     import json
+    import re
     
-    r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
-    if r.status_code != 200:
-        raise Exception(f"Failed to fetch {url}: {r.status_code}")
-        
-    soup = BeautifulSoup(r.text, 'html.parser')
+    best_df = None
+    value_pattern = r'-?(?:\d+(?:\.\d*)?|\.\d+)'
+    point_pattern = r'\[\s*\d{13}\s*,\s*(?:' + value_pattern + r'|null|None)\s*\]'
+    array_pattern = r'\[\s*' + point_pattern + r'(?:\s*,\s*' + point_pattern + r')+\s*\]'
     
-    # 1. Try to extract Highcharts series from JS scripts (Preferred)
-    for script in soup.find_all('script'):
-        if script.string:
-            m = re.search(r'series:\s*\[\s*\{.*?data:\s*(\[\[.*?\]\])', script.string, re.DOTALL)
-            if not m:
-                m = re.search(r'(\[\[\d{13},[^\]]+\](?:,\s*\[\d{13},[^\]]+\])*\])', script.string)
-            if m:
-                try:
-                    data = json.loads(m.group(1))
-                    rows = []
-                    for pt in data:
-                        if len(pt) >= 2 and pt[1] is not None:
-                            dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
-                            rows.append([dt, float(pt[1])])
-                    df = pd.DataFrame(rows, columns=['date', 'change'])
-                    df = df.drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                    if len(df) >= 6:
-                        return df
-                except Exception:
-                    pass
-
-    # 2. Fallback to Calendar Table Extractor
-    try:
-        dfs = pd.read_html(StringIO(r.text))
-        for df in dfs:
-            if 'Reference' in df.columns and 'Actual' in df.columns and 'Calendar' in df.columns:
-                df = df.dropna(subset=['Calendar', 'Actual', 'Reference'])
-                rows = []
-                for _, row in df.iterrows():
+    for attempt in range(3):
+        try:
+            r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
+            if r.status_code == 200 and "Please verify you are a human" not in r.text and "Cloudflare" not in r.text.title():
+                
+                # 2.1 Try JSON Array of Dicts format
+                blocks2 = re.findall(r'\[\s*\{[^\]]*?"DateTime"\s*:\s*"[^"]+".*?\}\s*\]', r.text)
+                for block in blocks2:
                     try:
-                        cal_str = str(row['Calendar']).split()[0]
-                        rel_dt = pd.to_datetime(cal_str)
-                        val_str = str(row['Actual']).replace('%', '').replace('+', '').strip()
-                        val = float(val_str)
-                        rows.append([rel_dt, val])
+                        data = json.loads(block)
+                        rows = []
+                        for pt in data:
+                            dt_str = pt.get("DateTime") or pt.get("Date")
+                            val = pt.get("Value")
+                            if dt_str and val is not None:
+                                dt = pd.to_datetime(dt_str).replace(day=1).normalize()
+                                rows.append([dt, float(val)])
+                        df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                        if len(df) >= 6:
+                            if best_df is None or len(df) > len(best_df):
+                                best_df = df
+                    except Exception:
+                        pass
+                
+                # 2.2 Try Highcharts standard array format (Direct string-matching isolation)
+                blocks = re.findall(array_pattern, r.text)
+                for block in blocks:
+                    try:
+                        block_clean = block.replace("null", "None")
+                        data = eval(block_clean)
+                        rows = []
+                        for pt in data:
+                            if len(pt) >= 2 and pt[1] is not None:
+                                try:
+                                    dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
+                                    val = float(pt[1])
+                                    rows.append([dt, val])
+                                except Exception:
+                                    pass
+                        df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                        if len(df) >= 6:
+                            if best_df is None or len(df) > len(best_df):
+                                best_df = df
                     except Exception:
                         continue
                 
-                res = pd.DataFrame(rows, columns=['release_date', 'change']).sort_values('release_date')
-                if len(res) >= 3:
-                    # Map the approximate reference date to the 1st of the prior month
-                    res['date'] = (res['release_date'] - pd.DateOffset(months=1)).apply(lambda x: x.replace(day=1)).dt.normalize()
-                    return res[['date', 'change']].drop_duplicates('date').sort_values('date').reset_index(drop=True)
-    except Exception as e:
-        print(f"Table extraction failed: {e}")
-        
+                # 2.3 Try Dynamic HTML Table formatting
+                if best_df is None:
+                    try:
+                        dfs = pd.read_html(StringIO(r.text))
+                        for df in dfs:
+                            if isinstance(df.columns, pd.MultiIndex):
+                                df.columns = ['_'.join(str(c) for c in col).strip() for col in df.columns.values]
+                            cols = [str(c).lower() for c in df.columns]
+                            if 'actual' in cols:
+                                actual_col = df.columns[cols.index('actual')]
+                                date_col = next((c for c in df.columns if any(x in str(c).lower() for x in ['date', 'calendar', 'time', 'release'])), None)
+                                ref_col = next((c for c in df.columns if 'reference' in str(c).lower() or 'month' in str(c).lower()), None)
+                                
+                                if date_col and actual_col:
+                                    df = df.dropna(subset=[date_col, actual_col])
+                                    rows = []
+                                    for _, row in df.iterrows():
+                                        try:
+                                            val = float(str(row[actual_col]).replace('%', '').replace('+', '').strip())
+                                            if ref_col and pd.notna(row[ref_col]):
+                                                ref_str = str(row[ref_col])
+                                                ref_dt = pd.to_datetime(ref_str, format="%b/%y", errors='coerce')
+                                                if pd.isna(ref_dt): ref_dt = pd.to_datetime(ref_str, errors='coerce')
+                                                if pd.notna(ref_dt):
+                                                    rows.append([ref_dt.replace(day=1).normalize(), val])
+                                                    continue
+                                            cal_str = str(row[date_col]).split()[0]
+                                            dt = (pd.to_datetime(cal_str) - pd.DateOffset(months=1)).replace(day=1).normalize()
+                                            rows.append([dt, val])
+                                        except Exception:
+                                            continue
+                                    res = pd.DataFrame(rows, columns=['date', 'change']).sort_values('date')
+                                    if len(res) >= 3:
+                                        res = res.drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
+                                        if best_df is None or len(res) > len(best_df):
+                                            best_df = res
+                    except Exception:
+                        pass
+                
+                if best_df is not None:
+                    return best_df
+        except Exception:
+            pass
+        time.sleep(2)
+            
     raise Exception(f"Could not extract data from {url}")
 
 try:
     # Fetch YoY (Annual)
-    yearly_retail = get_te_data("https://tradingeconomics.com/japan/retail-sales-annual")
+    yearly_retail = get_te_data("https://tradingeconomics.com/japan/retail-sales-annual", "Retail Sales YoY")
     yearly_retail = yearly_retail.rename(columns={'change': 'yearly_change'})
     
     # Fetch MoM
-    monthly_retail = get_te_data("https://tradingeconomics.com/japan/retail-sales-mom")
+    monthly_retail = get_te_data("https://tradingeconomics.com/japan/retail-sales-mom", "Retail Sales MoM")
     
     latest_monthly = monthly_retail.tail(3).reset_index(drop=True)
     print("\nJapan Retail Sales Monthly")
