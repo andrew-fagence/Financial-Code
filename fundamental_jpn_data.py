@@ -390,79 +390,100 @@ print("\nJapan Real GDP prepared for batch update successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (E-Stat API Fallback)
+# JAPAN RETAIL SALES (E-Stat Dynamic JSON + DB.nomics Fallback)
 # =============================================================================
-print("\nFetching Japan Retail Sales from E-Stat...")
+print("\nFetching Japan Retail Sales...")
+monthly_retail = None
+
 try:
-    # Safely download the Retail Sales (商業販売額) Excel file via E-Stat file endpoints
-    retail_url = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000031387992&fileKind=0"
-    r = session.get(retail_url, headers=HEADERS, timeout=60)
-    r.raise_for_status()
+    print("Attempting E-Stat Dynamic API...")
+    APP_ID = "b0bc8765e50cb21888f0bfc4aa3189a2aab22ae7"
     
-    b = BytesIO(r.content)
-    xl = pd.ExcelFile(b)
-    best_df = None
-    best_retail_col = -1
-    best_start_row = -1
+    # Dynamically search E-Stat to avoid hardcoded IDs that change
+    search_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsList?appId={APP_ID}&searchWord=商業動態統計&lang=J"
+    r_search = session.get(search_url, headers=HEADERS, timeout=60)
+    r_search.raise_for_status()
     
-    for sheet in xl.sheet_names:
-        df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
-        if len(df_temp.columns) > 0:
-            df_temp[0] = df_temp[0].ffill()
+    datalist = r_search.json().get("GET_STATS_LIST", {}).get("DATALIST_INF", {}).get("TABLE_INF", [])
+    if isinstance(datalist, dict): datalist = [datalist]
+        
+    target_id = None
+    for table in datalist:
+        stat_name = str(table.get("STAT_NAME", {}).get("$", ""))
+        title = str(table.get("TITLE", {}).get("$", ""))
+        # Discover the exact Monthly Retail Sales Value dataset ID dynamically
+        if "商業動態" in stat_name and "業種別" in title and "販売額" in title and "指数" not in title:
+            target_id = table.get("@id")
+            break
             
-        for row_idx in range(min(100, len(df_temp))):
-            row_vals = df_temp.iloc[row_idx].astype(str).tolist()
-            for col_idx, val in enumerate(row_vals):
-                val_clean = str(val).replace(" ", "").replace("\n", "").replace("　", "")
-                
-                # Match strict '小売業' up to length 6 to avoid subset categories
-                if "小売業" in val_clean and len(val_clean) <= 6:
-                    best_retail_col = col_idx
-                    best_start_row = row_idx + 1
-                    break
-            if best_retail_col != -1:
+    if not target_id:
+        raise Exception("Could not dynamically find the statsDataId for Retail Sales in E-Stat.")
+        
+    data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
+    r_data = session.get(data_url, headers=HEADERS, timeout=60)
+    r_data.raise_for_status()
+    data = r_data.json()
+    
+    class_objs = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("CLASS_INF", {}).get("CLASS_OBJ", [])
+    if isinstance(class_objs, dict): class_objs = [class_objs]
+        
+    retail_code, cat_id = None, None
+    for c in class_objs:
+        c_id = c.get("@id")
+        classes = c.get("CLASS", [])
+        if isinstance(classes, dict): classes = [classes]
+        for cls in classes:
+            name = str(cls.get("@name", ""))
+            # Broad search for the retail sales category inside E-Stat payload
+            if "小売業" in name and not any(x in name for x in ["自動車", "機械", "燃料"]):
+                retail_code = cls.get("@code")
+                cat_id = c_id
                 break
-                
-        if best_retail_col != -1:
-            best_df = df_temp
-            # Ensure it is the correct monthly time series sheet
-            if any(x in sheet for x in ["季調", "季節", "月", "第1表", "第１表"]):
-                break
-                
-    if best_df is None or best_retail_col == -1:
-        raise Exception(f"Could not locate Retail Sales column. Sheets: {xl.sheet_names}")
+        if retail_code: break
+            
+    if not retail_code:
+        raise Exception("Could not find '小売業' category code in E-Stat dataset.")
+        
+    values = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("DATA_INF", {}).get("VALUE", [])
+    if not isinstance(values, list): values = [values] if values else []
         
     rows = []
-    for i in range(best_start_row, len(best_df)):
-        cols = best_df.iloc[i, 0:5].values
-        clean_cols = []
-        for x in cols:
-            if pd.isna(x): continue
-            s = str(x).strip()
-            if s.endswith('.0'): s = s[:-2]
-            clean_cols.append(s)
-            
-        row_str = "".join(clean_cols)
-        m = re.search(r"(19\d{2}|20\d{2})\D{0,4}([01]?[0-9])[月\-\/\.]?", row_str)
-        if not m: continue
-            
-        year = int(m.group(1))
-        month = int(m.group(2))
-        if month < 1 or month > 12: continue
-            
-        val_raw = best_df.iloc[i, best_retail_col]
-        val_str = str(val_raw).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').replace('△', '-').strip()
-        
-        value = pd.to_numeric(val_str, errors="coerce")
-        if pd.notna(value):
-            rows.append([pd.Timestamp(year, month, 1), value])
-            
-    monthly_retail = pd.DataFrame(rows, columns=["date", "retail"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    for v in values:
+        if v.get(f"@{cat_id}") == retail_code:
+            t_str = str(v.get("@time", ""))
+            if len(t_str) >= 6:
+                year, month = t_str[:4], t_str[4:6]
+                if month != "00" and month.isdigit() and 1 <= int(month) <= 12:
+                    val = pd.to_numeric(v.get("$"), errors="coerce")
+                    if pd.notna(val):
+                        rows.append([pd.Timestamp(int(year), int(month), 1), val])
+                        
+    monthly_retail = pd.DataFrame(rows, columns=["date", "retail"]).groupby("date")["retail"].first().reset_index()
+    monthly_retail = monthly_retail.sort_values("date").reset_index(drop=True)
+    
     if len(monthly_retail) < 12:
-        raise Exception("Not enough data points extracted from E-Stat Retail Sales.")
+        raise Exception("Insufficient data from E-Stat.")
     print("Successfully retrieved Retail Sales via E-Stat.")
+    
 except Exception as e:
-    raise Exception(f"All download attempts for Japan Retail Sales failed: {e}")
+    print(f"E-Stat method failed: {e}. Falling back to DB.nomics API...")
+    try:
+        # OECD MEI dataset for Japan Total Retail Trade Value - DB.nomics REST API
+        nomics_url = "https://api.db.nomics.world/v22/series/OECD/MEI/JPN.SLRTTO02.IXOBSA.M"
+        r_nomics = session.get(nomics_url, headers=HEADERS, timeout=60)
+        r_nomics.raise_for_status()
+        
+        series_data = r_nomics.json()["series"]["docs"][0]
+        monthly_retail = pd.DataFrame({
+            "date": pd.to_datetime(series_data["period"]),
+            "retail": pd.to_numeric(series_data["value"], errors="coerce")
+        }).dropna().sort_values("date").reset_index(drop=True)
+        
+        if len(monthly_retail) < 12:
+            raise Exception("Insufficient data from DB.nomics.")
+        print("Successfully retrieved Retail Sales via DB.nomics.")
+    except Exception as e2:
+        raise Exception(f"All download attempts for Japan Retail Sales failed. E-Stat: {e} | DB.nomics: {e2}")
 
 monthly_retail["change"] = monthly_retail["retail"].pct_change() * 100
 latest_monthly = monthly_retail.dropna(subset=["change"]).tail(3).reset_index(drop=True)
