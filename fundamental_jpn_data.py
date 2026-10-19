@@ -405,12 +405,21 @@ try:
     r_search.raise_for_status()
     
     datalist = r_search.json().get("GET_STATS_LIST", {}).get("DATALIST_INF", {}).get("TABLE_INF", [])
-    if isinstance(datalist, dict): datalist = [datalist]
+    if isinstance(datalist, dict): 
+        datalist = [datalist]
         
+    def extract_text(node):
+        """Safely extract strings regardless of whether they are dicts or raw strings in E-Stat JSON."""
+        if isinstance(node, dict):
+            return str(node.get("$", ""))
+        return str(node)
+
     target_id = None
     for table in datalist:
-        stat_name = str(table.get("STAT_NAME", {}).get("$", ""))
-        title = str(table.get("TITLE", {}).get("$", ""))
+        if not isinstance(table, dict): continue
+        stat_name = extract_text(table.get("STAT_NAME", ""))
+        title = extract_text(table.get("TITLE", ""))
+        
         # Discover the exact Monthly Retail Sales Value dataset ID dynamically
         if "商業動態" in stat_name and "業種別" in title and "販売額" in title and "指数" not in title:
             target_id = table.get("@id")
@@ -429,11 +438,13 @@ try:
         
     retail_code, cat_id = None, None
     for c in class_objs:
+        if not isinstance(c, dict): continue
         c_id = c.get("@id")
         classes = c.get("CLASS", [])
         if isinstance(classes, dict): classes = [classes]
         for cls in classes:
-            name = str(cls.get("@name", ""))
+            if not isinstance(cls, dict): continue
+            name = extract_text(cls.get("@name", ""))
             # Broad search for the retail sales category inside E-Stat payload
             if "小売業" in name and not any(x in name for x in ["自動車", "機械", "燃料"]):
                 retail_code = cls.get("@code")
@@ -449,6 +460,7 @@ try:
         
     rows = []
     for v in values:
+        if not isinstance(v, dict): continue
         if v.get(f"@{cat_id}") == retail_code:
             t_str = str(v.get("@time", ""))
             if len(t_str) >= 6:
@@ -469,14 +481,15 @@ except Exception as e:
     print(f"E-Stat method failed: {e}. Falling back to DB.nomics API...")
     try:
         # OECD MEI dataset for Japan Total Retail Trade Value - DB.nomics REST API
-        nomics_url = "https://api.db.nomics.world/v22/series/OECD/MEI/JPN.SLRTTO02.IXOBSA.M"
+        # ?observations=1 is required to actually return the period and value arrays
+        nomics_url = "https://api.db.nomics.world/v22/series/OECD/MEI/JPN.SLRTTO02.IXOBSA.M?observations=1"
         r_nomics = session.get(nomics_url, headers=HEADERS, timeout=60)
         r_nomics.raise_for_status()
         
         series_data = r_nomics.json()["series"]["docs"][0]
         monthly_retail = pd.DataFrame({
-            "date": pd.to_datetime(series_data["period"]),
-            "retail": pd.to_numeric(series_data["value"], errors="coerce")
+            "date": pd.to_datetime(series_data.get("period", [])),
+            "retail": pd.to_numeric(series_data.get("value", []), errors="coerce")
         }).dropna().sort_values("date").reset_index(drop=True)
         
         if len(monthly_retail) < 12:
