@@ -390,33 +390,77 @@ print("\nJapan Real GDP prepared for batch update successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (FRED API Fallback)
+# JAPAN RETAIL SALES (E-Stat API Fallback)
 # =============================================================================
-print("\nFetching Japan Retail Sales from FRED...")
+print("\nFetching Japan Retail Sales from E-Stat...")
 try:
-    try:
-        from curl_cffi import requests as cffi_requests
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
-        from curl_cffi import requests as cffi_requests
-
-    # JPNSLRTTO02IXOBSAM is Total Retail Trade Value for Japan (Index, Seasonally Adjusted)
-    fred_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=JPNSLRTTO02IXOBSAM"
-    # Use curl_cffi to bypass GitHub Actions IP blocks by FRED (Cloudflare/WAF)
-    r = cffi_requests.get(fred_url, impersonate="chrome120", timeout=60)
+    # Safely download the Retail Sales (商業販売額) Excel file via E-Stat file endpoints
+    retail_url = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000031387992&fileKind=0"
+    r = session.get(retail_url, headers=HEADERS, timeout=60)
+    r.raise_for_status()
     
-    if r.status_code != 200:
-        raise Exception(f"HTTP {r.status_code}: {r.text}")
+    b = BytesIO(r.content)
+    xl = pd.ExcelFile(b)
+    best_df = None
+    best_retail_col = -1
+    best_start_row = -1
     
-    df_retail = pd.read_csv(StringIO(r.text), parse_dates=["DATE"])
-    df_retail.columns = ["date", "retail"]
-    df_retail["retail"] = pd.to_numeric(df_retail["retail"], errors="coerce")
-    monthly_retail = df_retail.dropna().sort_values("date").reset_index(drop=True)
-    
+    for sheet in xl.sheet_names:
+        df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
+        if len(df_temp.columns) > 0:
+            df_temp[0] = df_temp[0].ffill()
+            
+        for row_idx in range(min(100, len(df_temp))):
+            row_vals = df_temp.iloc[row_idx].astype(str).tolist()
+            for col_idx, val in enumerate(row_vals):
+                val_clean = str(val).replace(" ", "").replace("\n", "").replace("　", "")
+                
+                # Match strict '小売業' up to length 6 to avoid subset categories
+                if "小売業" in val_clean and len(val_clean) <= 6:
+                    best_retail_col = col_idx
+                    best_start_row = row_idx + 1
+                    break
+            if best_retail_col != -1:
+                break
+                
+        if best_retail_col != -1:
+            best_df = df_temp
+            # Ensure it is the correct monthly time series sheet
+            if any(x in sheet for x in ["季調", "季節", "月", "第1表", "第１表"]):
+                break
+                
+    if best_df is None or best_retail_col == -1:
+        raise Exception(f"Could not locate Retail Sales column. Sheets: {xl.sheet_names}")
+        
+    rows = []
+    for i in range(best_start_row, len(best_df)):
+        cols = best_df.iloc[i, 0:5].values
+        clean_cols = []
+        for x in cols:
+            if pd.isna(x): continue
+            s = str(x).strip()
+            if s.endswith('.0'): s = s[:-2]
+            clean_cols.append(s)
+            
+        row_str = "".join(clean_cols)
+        m = re.search(r"(19\d{2}|20\d{2})\D{0,4}([01]?[0-9])[月\-\/\.]?", row_str)
+        if not m: continue
+            
+        year = int(m.group(1))
+        month = int(m.group(2))
+        if month < 1 or month > 12: continue
+            
+        val_raw = best_df.iloc[i, best_retail_col]
+        val_str = str(val_raw).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').replace('△', '-').strip()
+        
+        value = pd.to_numeric(val_str, errors="coerce")
+        if pd.notna(value):
+            rows.append([pd.Timestamp(year, month, 1), value])
+            
+    monthly_retail = pd.DataFrame(rows, columns=["date", "retail"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
     if len(monthly_retail) < 12:
-        raise Exception("Not enough Retail Sales data retrieved from FRED.")
-    print("Successfully retrieved Retail Sales via FRED.")
-    
+        raise Exception("Not enough data points extracted from E-Stat Retail Sales.")
+    print("Successfully retrieved Retail Sales via E-Stat.")
 except Exception as e:
     raise Exception(f"All download attempts for Japan Retail Sales failed: {e}")
 
@@ -482,14 +526,14 @@ r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 b_ind = BytesIO(r.content)
 
-raw = pd.read_excel(b_ind, sheet_name="出荷", header=None)
+raw_ind = pd.read_excel(b_ind, sheet_name="出荷", header=None)
 
 dates = pd.to_datetime(
-    raw.iloc[2, 4:].astype(str).str.replace(".0", "", regex=False),
+    raw_ind.iloc[2, 4:].astype(str).str.replace(".0", "", regex=False),
     format="%Y%m",
     errors="coerce"
 )
-values = pd.to_numeric(raw.iloc[3, 4:], errors="coerce")
+values = pd.to_numeric(raw_ind.iloc[3, 4:], errors="coerce")
 
 df = pd.DataFrame({"date": dates.values, "shipments": values.values})
 df = df.dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
@@ -538,16 +582,16 @@ print("\nJapan Industrial Shipments prepared for batch update successfully")
 # =============================================================================
 # JAPAN INDUSTRIAL PRODUCTION DATA
 # =============================================================================
-raw = pd.read_excel(b_ind, sheet_name="生産", header=None)
+raw_prod = pd.read_excel(b_ind, sheet_name="生産", header=None)
 
 industry_row = 3
 start_col = 4
 dates = pd.to_datetime(
-    raw.iloc[2, start_col:].astype(str).str.replace(".0", "", regex=False),
+    raw_prod.iloc[2, start_col:].astype(str).str.replace(".0", "", regex=False),
     format="%Y%m",
     errors="coerce"
 )
-values = pd.to_numeric(raw.iloc[industry_row, start_col:], errors="coerce")
+values = pd.to_numeric(raw_prod.iloc[industry_row, start_col:], errors="coerce")
 
 df = pd.DataFrame({"date": dates.values, "production": values.values})
 df = df.dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
@@ -604,14 +648,15 @@ URL = (
 r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
 
-raw = pd.read_excel(BytesIO(r.content), sheet_name="季節調整値", header=None)
+# Save 'raw_lfs' reference so we can reuse it later without fetching again
+raw_lfs = pd.read_excel(BytesIO(r.content), sheet_name="季節調整値", header=None)
 
-year_raw = raw.iloc[10:, 0].astype(str).str.strip()
-month_raw = raw.iloc[10:, 1].astype(str).str.strip()
+year_raw = raw_lfs.iloc[10:, 0].astype(str).str.strip()
+month_raw = raw_lfs.iloc[10:, 1].astype(str).str.strip()
 
 year = year_raw.str.extract(r"((?:19|20)\d{2})", expand=False).ffill()
 month = month_raw.str.extract(r"(1[0-2]|0?[1-9])", expand=False)
-employed = pd.to_numeric(raw.iloc[10:, 7], errors="coerce")
+employed = pd.to_numeric(raw_lfs.iloc[10:, 7], errors="coerce")
 
 df = pd.DataFrame({
     "year": pd.to_numeric(year, errors="coerce"),
@@ -673,16 +718,16 @@ def number(x):
 
 rows = []
 current_year = None
-for i in range(10, len(raw)):
-    y_val = number(raw.iloc[i, 0])
+for i in range(10, len(raw_lfs)):
+    y_val = number(raw_lfs.iloc[i, 0])
     if y_val is not None and 1950 <= y_val <= 2030:
         current_year = int(y_val)
     if current_year is None:
         continue
-    m_val = number(raw.iloc[i, 1])
+    m_val = number(raw_lfs.iloc[i, 1])
     if m_val is None or not 1 <= m_val <= 12:
         continue
-    rate = number(raw.iloc[i, 19])
+    rate = number(raw_lfs.iloc[i, 19])
     if rate is None:
         continue
     rows.append([pd.Timestamp(current_year, int(m_val), 1), rate])
@@ -733,45 +778,55 @@ print("\nJapan Unemployment Rate prepared for batch update successfully")
 
 
 # =============================================================================
-# JAPAN LABOUR FORCE PARTICIPATION RATE (FRED Fallback)
+# JAPAN LABOUR FORCE PARTICIPATION RATE (Re-using E-Stat Memory Buffer)
 # =============================================================================
-print("\nFetching Japan Labour Force Participation Rate from FRED...")
+print("\nFetching Japan Labour Force Participation Rate from E-Stat...")
 try:
-    try:
-        from curl_cffi import requests as cffi_requests
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
-        from curl_cffi import requests as cffi_requests
+    lfpr_col = None
+    
+    # Locate the LFPR column from the exact same Labour Force survey fetched moments ago
+    for c in range(raw_lfs.shape[1]):
+        col_texts = "".join(str(x) for x in raw_lfs.iloc[0:15, c] if pd.notna(x)).replace(" ", "").replace("\n", "")
+        if "労働力率" in col_texts:
+            lfpr_col = c
+            break
 
-    # LRAC64TTJPM156S is LFPR for Japan (15 to 64 Years, Total, Seasonally Adjusted)
-    fred_lfpr_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=LRAC64TTJPM156S"
-    r = cffi_requests.get(fred_lfpr_url, impersonate="chrome120", timeout=60)
-    
-    if r.status_code != 200:
-        raise Exception(f"HTTP {r.status_code}: {r.text}")
-    
-    df_lfpr = pd.read_csv(StringIO(r.text), parse_dates=["DATE"])
-    df_lfpr.columns = ["date", "lfpr"]
-    df_lfpr["lfpr"] = pd.to_numeric(df_lfpr["lfpr"], errors="coerce")
-    
-    df = df_lfpr.dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
-    
-    if len(df) < 15:
-        raise Exception(f"Too few LFPR observations: {len(df)}")
-    print("Successfully retrieved LFPR via FRED.")
-    
+    rows = []
+    for i in range(10, len(raw_lfs)):
+        y_val = number(raw_lfs.iloc[i, 0])
+        if y_val is None or not (1950 <= y_val <= 2030):
+            continue
+        m_val = number(raw_lfs.iloc[i, 1])
+        if m_val is None or not (1 <= m_val <= 12):
+            continue
+            
+        if lfpr_col is not None:
+            val = number(raw_lfs.iloc[i, lfpr_col])
+        else:
+            # Fallback to direct calculation (Labour Force / Population 15+ * 100)
+            pop = number(raw_lfs.iloc[i, 2])
+            lf = number(raw_lfs.iloc[i, 3])
+            val = (lf / pop * 100) if pop and lf else None
+            
+        if val is not None:
+            rows.append([pd.Timestamp(int(y_val), int(m_val), 1), val])
+            
+    df_lfpr = pd.DataFrame(rows, columns=["date", "lfpr"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    if len(df_lfpr) < 15:
+        raise Exception(f"Too few LFPR observations: {len(df_lfpr)}")
+    print("Successfully extracted LFPR via E-Stat local memory buffer.")
 except Exception as e:
-    raise Exception(f"Failed to fetch LFPR: {e}")
+    raise Exception(f"Failed to extract LFPR: {e}")
 
-monthly = df.tail(3).reset_index(drop=True)
+monthly = df_lfpr.tail(3).reset_index(drop=True)
 
-q = df.copy()
+q = df_lfpr.copy()
 q["quarter"] = q["date"].dt.to_period("Q")
 q = q.groupby("quarter").filter(lambda x: len(x) == 3)
 quarterly = q.groupby("quarter")["lfpr"].mean().tail(3).reset_index(name="lfpr")
 quarterly["date"] = quarterly["quarter"].dt.end_time.dt.normalize()
 
-y = df.copy()
+y = df_lfpr.copy()
 y["yoy"] = y["lfpr"] - y["lfpr"].shift(12)
 yearly = y.dropna(subset=["yoy"]).tail(3)
 
@@ -849,10 +904,10 @@ print("\nJapan Average Hourly Earnings prepared for batch update successfully")
 URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040460962&fileKind=0"
 r = session.get(URL, headers=HEADERS, timeout=60)
 r.raise_for_status()
-raw = pd.read_excel(BytesIO(r.content), header=None)
+raw_claims = pd.read_excel(BytesIO(r.content), header=None)
 
 years = {}
-for c, v in enumerate(raw.iloc[2]):
+for c, v in enumerate(raw_claims.iloc[2]):
     s = str(v)
     m = pd.Series([s]).str.extract(r"((?:19|20)\d{2})年度")[0].iloc[0]
     if pd.notna(m): years[c] = int(m)
@@ -860,11 +915,11 @@ for c, v in enumerate(raw.iloc[2]):
 months_map_claims = {"4月": 4, "5月": 5, "6月": 6, "7月": 7, "8月": 8, "9月": 9, "10月": 10, "11月": 11, "12月": 12, "1月": 1, "2月": 2, "3月": 3}
 
 rows = []
-for r_idx in range(4, len(raw)):
-    m_val = months_map_claims.get(str(raw.iloc[r_idx, 0]).strip())
+for r_idx in range(4, len(raw_claims)):
+    m_val = months_map_claims.get(str(raw_claims.iloc[r_idx, 0]).strip())
     if not m_val: continue
     for c, fy in years.items():
-        v = pd.to_numeric(raw.iloc[r_idx, c], errors="coerce")
+        v = pd.to_numeric(raw_claims.iloc[r_idx, c], errors="coerce")
         if pd.notna(v):
             rows.append([pd.Timestamp(fy if m_val >= 4 else fy + 1, m_val, 1), float(v)])
 
@@ -897,7 +952,7 @@ print("\nJapan Initial Jobless Claims proxy prepared for batch update successful
 # =============================================================================
 print("\nFetching Japan Job Openings-to-Applicants Ratio from JILPT...")
 try:
-    # Reusing your highly robust HTML parsing logic mapped for JILPT table formats
+    # Highly robust HTML parsing logic mapped for JILPT table formats natively
     URL_JOBS = "https://www.jil.go.jp/english/estatis/eshuyo/e0208.html"
     r = session.get(URL_JOBS, headers=HEADERS, timeout=60)
     r.raise_for_status()
