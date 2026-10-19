@@ -395,7 +395,7 @@ print("\nJapan Real GDP prepared for batch update successfully")
 print("\nFetching Japan Retail Sales from Trading Economics...")
 
 def get_te_data(url, indicator_name_api):
-    # 1. API Attempt
+    # 1. API Attempt (Works perfectly for select public indicators)
     api_url = f"https://api.tradingeconomics.com/historical/country/japan/indicator/{urllib.parse.quote(indicator_name_api)}?c=guest:guest&f=json"
     try:
         r = session.get(api_url, headers=HEADERS, timeout=10)
@@ -410,7 +410,7 @@ def get_te_data(url, indicator_name_api):
                         dt = pd.to_datetime(dt_str).replace(day=1).normalize()
                         rows.append([dt, float(val)])
                 df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
-                if len(df) >= 3:
+                if len(df) >= 12:
                     return df
     except Exception:
         pass
@@ -437,12 +437,12 @@ def get_te_data(url, indicator_name_api):
                         dt = pd.to_datetime(dt_str).replace(day=1).normalize()
                         rows.append([dt, float(val)])
                 df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                if len(df) >= 6:
+                if len(df) >= 12:
                     if best_df is None or len(df) > len(best_df): best_df = df
             except Exception: pass
         if best_df is not None: return best_df
         
-        # Method B: Highcharts array
+        # Method B: Highcharts string array
         blocks = re.findall(array_pattern, html_text)
         for block in blocks:
             try:
@@ -456,45 +456,10 @@ def get_te_data(url, indicator_name_api):
                             rows.append([dt, float(pt[1])])
                         except Exception: pass
                 df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                if len(df) >= 6:
+                if len(df) >= 12:
                     if best_df is None or len(df) > len(best_df): best_df = df
             except Exception: continue
-        if best_df is not None: return best_df
-
-        # Method C: HTML Table
-        try:
-            dfs = pd.read_html(StringIO(html_text))
-            for df in dfs:
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = ['_'.join(str(c) for c in col).strip() for col in df.columns.values]
-                cols = [str(c).lower() for c in df.columns]
-                if 'actual' in cols:
-                    actual_col = df.columns[cols.index('actual')]
-                    date_col = next((c for c in df.columns if any(x in str(c).lower() for x in ['date', 'calendar', 'time', 'release'])), None)
-                    ref_col = next((c for c in df.columns if 'reference' in str(c).lower() or 'month' in str(c).lower()), None)
-                    
-                    if date_col and actual_col:
-                        df = df.dropna(subset=[date_col, actual_col])
-                        rows = []
-                        for _, row in df.iterrows():
-                            try:
-                                val = float(str(row[actual_col]).replace('%', '').replace('+', '').strip())
-                                if ref_col and pd.notna(row[ref_col]):
-                                    ref_str = str(row[ref_col])
-                                    ref_dt = pd.to_datetime(ref_str, format="%b/%y", errors='coerce')
-                                    if pd.isna(ref_dt): ref_dt = pd.to_datetime(ref_str, errors='coerce')
-                                    if pd.notna(ref_dt):
-                                        rows.append([ref_dt.replace(day=1).normalize(), val])
-                                        continue
-                                cal_str = str(row[date_col]).split()[0]
-                                dt = (pd.to_datetime(cal_str) - pd.DateOffset(months=1)).replace(day=1).normalize()
-                                rows.append([dt, val])
-                            except Exception: continue
-                        res = pd.DataFrame(rows, columns=['date', 'change']).sort_values('date')
-                        if len(res) >= 3:
-                            res = res.drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
-                            if best_df is None or len(res) > len(best_df): best_df = res
-        except Exception: pass
+            
         return best_df
 
     # 2. curl_cffi attempt (Fastest Web Scrape)
@@ -513,6 +478,25 @@ def get_te_data(url, indicator_name_api):
     except Exception:
         pass
 
+    # Dynamic Javascript Payload to extract raw xData/yData arrays directly from Highcharts object
+    js_script = """
+    var chart = window.Highcharts && window.Highcharts.charts && window.Highcharts.charts.find(c => c !== undefined);
+    if(chart && chart.series && chart.series.length > 0) {
+        var s = chart.series.find(x => x.name && (x.name.indexOf("Retail Sales") > -1 || x.name.indexOf("YoY") > -1 || x.name.indexOf("MoM") > -1));
+        if (!s) s = chart.series[0];
+        if(s.xData && s.yData) {
+            var res = [];
+            for(var i=0; i<s.xData.length; i++) {
+                if (s.yData[i] !== null && s.yData[i] !== undefined) {
+                    res.push([s.xData[i], s.yData[i]]);
+                }
+            }
+            return res;
+        }
+    }
+    return null;
+    """
+
     # 3. SeleniumBase Undetectable Browser Attempt
     try:
         try:
@@ -524,34 +508,33 @@ def get_te_data(url, indicator_name_api):
         print(" Using undetectable browser (SeleniumBase) to bypass Cloudflare...")
         with SB(uc=True, headless=True) as sb:
             sb.open(url)
-            sb.sleep(6) # Wait for Cloudflare to validate
             
-            try:
-                js_data = sb.execute_script(
-                    "var chart = window.Highcharts && window.Highcharts.charts.find(c => c !== undefined); "
-                    "if(chart) return chart.series[0].options.data; return null;"
-                )
-                if js_data:
-                    rows = []
-                    for pt in js_data:
-                        if isinstance(pt, dict) and 'x' in pt and 'y' in pt:
-                            dt = pd.to_datetime(pt['x'], unit='ms').replace(day=1).normalize()
-                            rows.append([dt, float(pt['y'])])
-                        elif isinstance(pt, (list, tuple)) and len(pt) >= 2 and pt[1] is not None:
+            df = None
+            for _ in range(20):
+                sb.sleep(1)
+                try:
+                    js_data = sb.execute_script(js_script)
+                    if js_data:
+                        rows = []
+                        for pt in js_data:
                             dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
                             rows.append([dt, float(pt[1])])
-                    df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                    if len(df) >= 6:
-                        return df
-            except Exception:
-                pass
+                        temp_df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                        if len(temp_df) >= 12:
+                            df = temp_df
+                            break
+                except Exception:
+                    pass
+                    
+            if df is not None:
+                return df
                 
             html = sb.get_page_source()
             res = parse_html(html)
             if res is not None:
                 return res
-    except Exception as e:
-        print(f" SeleniumBase attempt failed: {e}")
+    except Exception:
+        pass
 
     # 4. undetected_chromedriver as final fallback
     try:
@@ -571,13 +554,32 @@ def get_te_data(url, indicator_name_api):
         
         driver = uc.Chrome(options=options)
         driver.get(url)
-        time.sleep(8)
-        html = driver.page_source
-        driver.quit()
         
-        res = parse_html(html)
-        if res is not None:
-            return res
+        df = None
+        for _ in range(20):
+            time.sleep(1)
+            try:
+                js_data = driver.execute_script(js_script)
+                if js_data:
+                    rows = []
+                    for pt in js_data:
+                        dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
+                        rows.append([dt, float(pt[1])])
+                    temp_df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                    if len(temp_df) >= 12:
+                        df = temp_df
+                        break
+            except Exception:
+                pass
+        
+        if df is None:
+            html = driver.page_source
+            df = parse_html(html)
+            
+        driver.quit()
+        if df is not None:
+            return df
+            
     except Exception as e:
         print(f" undetected_chromedriver attempt failed: {e}")
 
