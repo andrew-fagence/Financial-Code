@@ -390,249 +390,76 @@ print("\nJapan Real GDP prepared for batch update successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (E-Stat API + Dynamic WAF Bypass Fallback)
+# JAPAN RETAIL SALES (FRED API Fallback)
 # =============================================================================
-# print("\nFetching Japan Retail Sales...")
-# 
-# def get_estat_retail():
-#     APP_ID = "b0bc8765e50cb21888f0bfc4aa3189a2aab22ae7"
-#     target_id = "0003348239" 
-#     
-#     data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
-#     r = session.get(data_url, headers=HEADERS, timeout=60)
-#     r.raise_for_status()
-#     data = r.json()
-#     
-#     class_objs = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("CLASS_INF", {}).get("CLASS_OBJ", [])
-#     if isinstance(class_objs, dict): class_objs = [class_objs]
-#     elif not isinstance(class_objs, list): class_objs = []
-#         
-#     retail_code = None
-#     cat_id = None
-#     
-#     for c in class_objs:
-#         if not isinstance(c, dict): continue
-#         c_id = c.get("@id")
-#         classes = c.get("CLASS", [])
-#         if isinstance(classes, dict): classes = [classes]
-#         if not isinstance(classes, list): continue
-#             
-#         for cls in classes:
-#             if not isinstance(cls, dict): continue
-#             name = str(cls.get("@name", ""))
-#             # Broad search for retail sales category
-#             if "小売" in name and not any(x in name for x in ["自動車", "機械", "燃料"]):
-#                 retail_code = cls.get("@code")
-#                 cat_id = c_id
-#                 break
-#         if retail_code: break
-#             
-#     if not retail_code:
-#         raise Exception("Could not dynamically find '小売業' category code in E-Stat dataset.")
-#         
-#     values = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("DATA_INF", {}).get("VALUE", [])
-#     if not isinstance(values, list):
-#         values = [values] if values else []
-#         
-#     rows = []
-#     for v in values:
-#         if not isinstance(v, dict): continue
-#         if v.get(f"@{cat_id}") == retail_code:
-#             t_str = str(v.get("@time", ""))
-#             if len(t_str) >= 6:
-#                 year = t_str[:4]
-#                 month = t_str[4:6]
-#                 if month != "00" and month.isdigit() and 1 <= int(month) <= 12:
-#                     val = pd.to_numeric(v.get("$"), errors="coerce")
-#                     if pd.notna(val):
-#                         rows.append([pd.Timestamp(int(year), int(month), 1), val])
-#                         
-#     df = pd.DataFrame(rows, columns=["date", "retail"]).groupby("date")["retail"].first().reset_index()
-#     df = df.sort_values("date").reset_index(drop=True)
-#     
-#     if len(df) < 12:
-#         raise Exception("Not enough data points extracted from E-Stat API.")
-#     return df
-# 
-# def get_meti_excel_fallback():
-#     try:
-#         from curl_cffi import requests as cffi_requests
-#     except ImportError:
-#         subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
-#         from curl_cffi import requests as cffi_requests
-#     try:
-#         from bs4 import BeautifulSoup
-#     except ImportError:
-#         subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
-#         from bs4 import BeautifulSoup
-# 
-#     urls_to_check = [
-#         "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html",
-#         "https://www.meti.go.jp/statistics/tyo/syoudou/result-2/index.html",
-#         "https://www.meti.go.jp/statistics/tyo/syoudou/result/index.html"
-#     ]
-#     
-#     excel_url = None
-#     for url in urls_to_check:
-#         try:
-#             r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
-#             if r.status_code == 200:
-#                 soup = BeautifulSoup(r.text, 'html.parser')
-#                 for link in soup.find_all('a'):
-#                     href = link.get('href', '')
-#                     text = link.get_text()
-#                     if '.xls' in href and any(x in text or x in href for x in ['業種別', '商業販売', '小売', '時系列', 'h2a']):
-#                         excel_url = urllib.parse.urljoin(url, href)
-#                         break
-#             if excel_url: break
-#         except Exception:
-#             pass
-#             
-#     if not excel_url:
-#         raise Exception("Could not dynamically find Excel link on any known METI page.")
-#         
-#     r_excel = cffi_requests.get(excel_url, impersonate="chrome120", headers={"Referer": "https://www.meti.go.jp/"}, timeout=45)
-#     if r_excel.status_code == 200 and (r_excel.content.startswith(b'PK') or r_excel.content.startswith(b'\xd0')):
-#         return BytesIO(r_excel.content)
-#         
-#     raise Exception("Failed to download the dynamic METI Excel file via WAF bypass.")
-# 
-# def load_series(b):
-#     b.seek(0)
-#     xl = pd.ExcelFile(b)
-#     best_df = None
-#     best_retail_col = -1
-#     best_start_row = -1
-#     
-#     for sheet in xl.sheet_names:
-#         df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
-#         
-#         # KEY FIX: Handle Excel visually merged cells by forward-filling the "Year" column
-#         if len(df_temp.columns) > 0:
-#             df_temp[0] = df_temp[0].ffill()
-#             
-#         retail_col = -1
-#         start_row = -1
-#         for row_idx in range(min(100, len(df_temp))):
-#             row_vals = df_temp.iloc[row_idx].astype(str).tolist()
-#             for col_idx, val in enumerate(row_vals):
-#                 val_clean = str(val).replace(" ", "").replace("\n", "")
-#                 if "小売業" in val_clean or "Retail" in val_clean:
-#                     retail_col = col_idx
-#                     start_row = row_idx + 1
-#                     break
-#             if retail_col != -1:
-#                 break
-#                 
-#         if retail_col != -1:
-#             best_df = df_temp
-#             best_retail_col = retail_col
-#             best_start_row = start_row
-#             if any(x in sheet for x in ["季調", "季節", "月", "第1表", "第１表"]):
-#                 break
-#                 
-#     if best_df is None or best_retail_col == -1:
-#         raise Exception(f"Could not dynamically locate '小売業' column. Sheets available: {xl.sheet_names}")
-# 
-#     df = best_df
-#     rows = []
-#     
-#     for i in range(best_start_row, len(df)):
-#         cols = df.iloc[i, 0:5].values
-#         clean_cols = []
-#         for x in cols:
-#             if pd.isna(x): continue
-#             s = str(x).strip()
-#             # Remove trailing .0 from years parsed as floats
-#             if s.endswith('.0'): s = s[:-2]
-#             clean_cols.append(s)
-#             
-#         row_str = "".join(clean_cols)
-#         
-#         # Dynamically matches: 2025年1月, 2025/01, 2025.1, or merged strings like 20251
-#         m = re.search(r"(19\d{2}|20\d{2})\D{0,4}([01]?[0-9])[月\-\/\.]?", row_str)
-#         if not m: continue
-#             
-#         year = int(m.group(1))
-#         month = int(m.group(2))
-#         if month < 1 or month > 12: continue
-#             
-#         date = pd.Timestamp(year, month, 1)
-#         val_raw = df.iloc[i, best_retail_col]
-#         val_str = str(val_raw).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').replace('△', '-').strip()
-#         
-#         value = pd.to_numeric(val_str, errors="coerce")
-#         if pd.notna(value):
-#             rows.append([date, value])
-#             
-#     res = pd.DataFrame(rows, columns=["date", "retail"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
-#     if len(res) < 12:
-#         raise Exception(f"Failed to extract sufficient time series data. Found {len(res)} rows.")
-#     return res
-# 
-# monthly_retail = None
-# 
-# try:
-#     monthly_retail = get_estat_retail()
-#     print("Successfully retrieved Retail Sales via E-Stat JSON API.")
-# except Exception as e:
-#     print(f"E-Stat API method failed: {e}")
-#     try:
-#         b_excel = get_meti_excel_fallback()
-#         monthly_retail = load_series(b_excel)
-#         print("Successfully retrieved Retail Sales via METI WAF Bypass fallback.")
-#     except Exception as e2:
-#         print(f"METI Excel fallback method failed: {e2}")
-#         raise Exception("All download attempts for Japan Retail Sales completely failed.")
-# 
-# monthly_retail["change"] = monthly_retail["retail"].pct_change() * 100
-# latest_monthly = monthly_retail.dropna(subset=["change"]).tail(3).reset_index(drop=True)
-# 
-# print("\nJapan Retail Sales Monthly")
-# print(latest_monthly[["date", "change"]])
-# 
-# # Quarterly
-# q_retail = monthly_retail.copy()
-# q_retail["quarter"] = q_retail["date"].dt.to_period("Q")
-# q_retail = (
-#     q_retail.groupby("quarter")
-#      .filter(lambda x: len(x) == 3)
-#      .groupby("quarter")["retail"]
-#      .last()
-# )
-# 
-# quarterly_retail = q_retail.pct_change().mul(100).dropna().tail(3).reset_index(name="change")
-# quarterly_retail["date"] = quarterly_retail["quarter"].dt.end_time.dt.normalize()
-# 
-# print("\nJapan Retail Sales Quarterly")
-# print(quarterly_retail[["date", "change"]])
-# 
-# # Yearly
-# monthly_retail["yearly_change"] = monthly_retail["retail"].pct_change(12) * 100
-# yearly_retail = monthly_retail.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
-# 
-# print("\nJapan Retail Sales Yearly")
-# print(yearly_retail[["date", "yearly_change"]])
-# 
-# # Google Sheets Update
-# monthly_values = []
-# for _, x in latest_monthly.iterrows():
-#     monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
-# 
-# quarterly_values = []
-# for _, x in quarterly_retail.iterrows():
-#     quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
-# 
-# yearly_values = []
-# for _, x in yearly_retail.iterrows():
-#     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
-# 
-# all_batch_updates.extend([
-#     {"range": "H23:M23", "values": [monthly_values]},
-#     {"range": "H28:M28", "values": [quarterly_values]},
-#     {"range": "H33:M33", "values": [yearly_values]}
-# ])
-# print("\nJapan Retail Sales prepared for batch update successfully")
+print("\nFetching Japan Retail Sales from FRED...")
+try:
+    # JPNSLRTTO02IXOBSAM is Total Retail Trade Value for Japan (Index, Seasonally Adjusted)
+    # Fetching directly via the open graph CSV export prevents any WAF blocking
+    fred_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=JPNSLRTTO02IXOBSAM"
+    r = session.get(fred_url, headers=HEADERS, timeout=60)
+    r.raise_for_status()
+    
+    df_retail = pd.read_csv(StringIO(r.text), parse_dates=["DATE"])
+    df_retail.columns = ["date", "retail"]
+    df_retail["retail"] = pd.to_numeric(df_retail["retail"], errors="coerce")
+    monthly_retail = df_retail.dropna().sort_values("date").reset_index(drop=True)
+    
+    if len(monthly_retail) < 12:
+        raise Exception("Not enough Retail Sales data retrieved from FRED.")
+    print("Successfully retrieved Retail Sales via FRED.")
+    
+except Exception as e:
+    raise Exception(f"All download attempts for Japan Retail Sales failed: {e}")
+
+monthly_retail["change"] = monthly_retail["retail"].pct_change() * 100
+latest_monthly = monthly_retail.dropna(subset=["change"]).tail(3).reset_index(drop=True)
+
+print("\nJapan Retail Sales Monthly")
+print(latest_monthly[["date", "change"]])
+
+# Quarterly
+q_retail = monthly_retail.copy()
+q_retail["quarter"] = q_retail["date"].dt.to_period("Q")
+q_retail = (
+    q_retail.groupby("quarter")
+     .filter(lambda x: len(x) == 3)
+     .groupby("quarter")["retail"]
+     .last()
+)
+
+quarterly_retail = q_retail.pct_change().mul(100).dropna().tail(3).reset_index(name="change")
+quarterly_retail["date"] = quarterly_retail["quarter"].dt.end_time.dt.normalize()
+
+print("\nJapan Retail Sales Quarterly")
+print(quarterly_retail[["date", "change"]])
+
+# Yearly
+monthly_retail["yearly_change"] = monthly_retail["retail"].pct_change(12) * 100
+yearly_retail = monthly_retail.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
+
+print("\nJapan Retail Sales Yearly")
+print(yearly_retail[["date", "yearly_change"]])
+
+# Google Sheets Update
+monthly_values = []
+for _, x in latest_monthly.iterrows():
+    monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
+
+quarterly_values = []
+for _, x in quarterly_retail.iterrows():
+    quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
+
+yearly_values = []
+for _, x in yearly_retail.iterrows():
+    yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
+
+all_batch_updates.extend([
+    {"range": "H23:M23", "values": [monthly_values]},
+    {"range": "H28:M28", "values": [quarterly_values]},
+    {"range": "H33:M33", "values": [yearly_values]}
+])
+print("\nJapan Retail Sales prepared for batch update successfully")
 
 
 # =============================================================================
@@ -898,64 +725,52 @@ print("\nJapan Unemployment Rate prepared for batch update successfully")
 
 
 # =============================================================================
-# JAPAN LABOUR FORCE PARTICIPATION RATE
+# JAPAN LABOUR FORCE PARTICIPATION RATE (FRED Fallback)
 # =============================================================================
-# try:
-#     import html5lib
-# except ImportError:
-#     subprocess.check_call([sys.executable, "-m", "pip", "install", "html5lib"])
-# 
-# URL = "https://ecitizen.jp/statdb/StatsData/0003005865"
-# html = session.get(URL, headers=HEADERS, timeout=60).text
-# tables = pd.read_html(StringIO(html))
-# t = max(tables, key=lambda x: x.shape[0])
-# t.columns = [str(c).strip() for c in t.columns]
-# 
-# t = t[
-#     (t.iloc[:, 0].astype(str) == "率") &
-#     (t.iloc[:, 1].astype(str) == "全産業") &
-#     (t.iloc[:, 2].astype(str) == "労働力人口") &
-#     (t.iloc[:, 3].astype(str) == "総数") &
-#     (t.iloc[:, 4].astype(str) == "全国")
-# ].copy()
-# 
-# t["date"] = pd.to_datetime(
-#     t.iloc[:, 5].astype(str).str.replace("年", "-", regex=False).str.replace("月", "", regex=False),
-#     format="%Y-%m",
-#     errors="coerce"
-# )
-# t["lfpr"] = pd.to_numeric(t.iloc[:, 7], errors="coerce")
-# 
-# df = t[["date", "lfpr"]].dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
-# 
-# if len(df) < 15:
-#     raise Exception(f"Too few LFPR observations: {len(df)}")
-# 
-# monthly = df.tail(3).reset_index(drop=True)
-# 
-# q = df.copy()
-# q["quarter"] = q["date"].dt.to_period("Q")
-# q = q.groupby("quarter").filter(lambda x: len(x) == 3)
-# quarterly = q.groupby("quarter")["lfpr"].mean().tail(3).reset_index(name="lfpr")
-# quarterly["date"] = quarterly["quarter"].dt.end_time.dt.normalize()
-# 
-# y = df.copy()
-# y["yoy"] = y["lfpr"] - y["lfpr"].shift(12)
-# yearly = y.dropna(subset=["yoy"]).tail(3)
-# 
-# def vals(d, col):
-#     out = []
-#     for _, x in d.iterrows():
-#         out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 2)]
-#     return out
-# 
-# all_batch_updates.extend([
-#     {"range": "N117:S117", "values": [vals(monthly, "lfpr")]},
-#     {"range": "N122:S122", "values": [vals(quarterly, "lfpr")]},
-#     {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
-# ])
-# print("\nJapan Labour Force Participation Rate prepared for batch update successfully")
+print("\nFetching Japan Labour Force Participation Rate from FRED...")
+try:
+    # LRAC64TTJPM156S is LFPR for Japan (15 to 64 Years, Total, Seasonally Adjusted)
+    fred_lfpr_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=LRAC64TTJPM156S"
+    r = session.get(fred_lfpr_url, headers=HEADERS, timeout=60)
+    r.raise_for_status()
+    
+    df_lfpr = pd.read_csv(StringIO(r.text), parse_dates=["DATE"])
+    df_lfpr.columns = ["date", "lfpr"]
+    df_lfpr["lfpr"] = pd.to_numeric(df_lfpr["lfpr"], errors="coerce")
+    
+    df = df_lfpr.dropna().drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    
+    if len(df) < 15:
+        raise Exception(f"Too few LFPR observations: {len(df)}")
+    print("Successfully retrieved LFPR via FRED.")
+    
+except Exception as e:
+    raise Exception(f"Failed to fetch LFPR: {e}")
 
+monthly = df.tail(3).reset_index(drop=True)
+
+q = df.copy()
+q["quarter"] = q["date"].dt.to_period("Q")
+q = q.groupby("quarter").filter(lambda x: len(x) == 3)
+quarterly = q.groupby("quarter")["lfpr"].mean().tail(3).reset_index(name="lfpr")
+quarterly["date"] = quarterly["quarter"].dt.end_time.dt.normalize()
+
+y = df.copy()
+y["yoy"] = y["lfpr"] - y["lfpr"].shift(12)
+yearly = y.dropna(subset=["yoy"]).tail(3)
+
+def vals(d, col):
+    out = []
+    for _, x in d.iterrows():
+        out += [x["date"].strftime("%Y-%m-%d"), round(float(x[col]), 2)]
+    return out
+
+all_batch_updates.extend([
+    {"range": "N117:S117", "values": [vals(monthly, "lfpr")]},
+    {"range": "N122:S122", "values": [vals(quarterly, "lfpr")]},
+    {"range": "N127:S127", "values": [vals(yearly, "lfpr")]}
+])
+print("\nJapan Labour Force Participation Rate prepared for batch update successfully")
 
 # =============================================================================
 # JAPAN AVERAGE HOURLY EARNINGS
@@ -1061,47 +876,69 @@ print("\nJapan Initial Jobless Claims proxy prepared for batch update successful
 
 
 # =============================================================================
-# JAPAN JOB OPENINGS
+# JAPAN JOB OPENINGS (JILPT Proxy via Active Job Openings-to-Applicants Ratio)
 # =============================================================================
-# URL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040478164&fileKind=0"
-# r = session.get(URL, headers=HEADERS, timeout=60)
-# r.raise_for_status()
-# raw = pd.read_excel(BytesIO(r.content), header=None)
-# 
-# months_list = range(1, 13)
-# rows = []
-# 
-# for i in range(5, len(raw)):
-#     y_val = str(raw.iloc[i, 0]).replace("年", "").strip()
-#     if not y_val.isdigit(): continue
-#     y_val = int(y_val)
-#     for m_val in months_list:
-#         v = pd.to_numeric(raw.iloc[i, 19 + m_val], errors="coerce")
-#         if pd.notna(v):
-#             rows.append([pd.Timestamp(y_val, m_val, 1), float(v)])
-# 
-# df = pd.DataFrame(rows, columns=["date", "openings"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
-# 
-# df["monthly"] = df["openings"].pct_change() * 100
-# monthly = df.dropna(subset=["monthly"]).tail(3)
-# 
-# q = df.assign(q=df.date.dt.to_period("Q"))
-# q = q.groupby("q").filter(lambda x: len(x) == 3).groupby("q").openings.mean()
-# quarterly = q.pct_change().mul(100).dropna().tail(3).reset_index(name="quarterly")
-# quarterly["date"] = quarterly.q.dt.end_time.dt.normalize()
-# 
-# df["yearly"] = df["openings"].pct_change(12) * 100
-# yearly = df.dropna(subset=["yearly"]).tail(3)
-# 
-# def vals_openings(d, c):
-#     return sum(([x.date.strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
-# 
-# all_batch_updates.extend([
-#     {"range": "AF117:AK117", "values": [vals_openings(monthly, "monthly")]},
-#     {"range": "AF122:AK122", "values": [vals_openings(quarterly, "quarterly")]},
-#     {"range": "AF127:AK127", "values": [vals_openings(yearly, "yearly")]}
-# ])
-# print("\nJapan Job Openings prepared for batch update successfully")
+print("\nFetching Japan Job Openings-to-Applicants Ratio from JILPT...")
+try:
+    # Reusing your highly robust HTML parsing logic mapped for JILPT table formats
+    URL_JOBS = "https://www.jil.go.jp/english/estatis/eshuyo/e0208.html"
+    r = session.get(URL_JOBS, headers=HEADERS, timeout=60)
+    r.raise_for_status()
+    
+    # Locate the active job openings table
+    t = next(x for x in pd.read_html(StringIO(r.text)) if "Active job openings" in x.to_string())
+    
+    rows = []
+    year = None
+    months_map_jobs = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, 
+                       "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+                       
+    for _, row_vals in t.iterrows():
+        a = [str(x).strip() for x in row_vals]
+        y_val = next((int(x) for x in a if re.fullmatch(r"20\d{2}", x)), None)
+        if y_val: year = y_val
+        m_val = next((months_map_jobs[x[:3]] for x in a if x[:3] in months_map_jobs), None)
+        
+        if not year or not m_val: continue
+        i = next(i for i, x in enumerate(a) if x[:3] in months_map_jobs)
+        
+        # Grab the headline float values
+        nums = [float(z.group().replace(",", "")) for x in a[i+1:] 
+                if (z := re.search(r"-?\d+(?:,\d{3})*(?:\.\d+)?", x.replace("p", "").replace("r", "")))]
+        
+        # The first column is "Excluding new school graduates and including part-timers" - standard proxy
+        if nums: 
+            rows.append([pd.Timestamp(year, m_val, 1), nums[0]])
+            
+    df = pd.DataFrame(rows, columns=["date", "openings"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    
+    if len(df) < 12:
+        raise Exception("Not enough Job Openings data retrieved from JILPT.")
+    print("Successfully retrieved Job Openings via JILPT.")
+    
+except Exception as e:
+    raise Exception(f"Failed to fetch Job Openings: {e}")
+
+df["monthly"] = df["openings"].pct_change() * 100
+monthly = df.dropna(subset=["monthly"]).tail(3)
+
+q = df.assign(q=df.date.dt.to_period("Q"))
+q = q.groupby("q").filter(lambda x: len(x) == 3).groupby("q")["openings"].mean()
+quarterly = q.pct_change().mul(100).dropna().tail(3).reset_index(name="quarterly")
+quarterly["date"] = quarterly["q"].dt.end_time.dt.normalize()
+
+df["yearly"] = df["openings"].pct_change(12) * 100
+yearly = df.dropna(subset=["yearly"]).tail(3)
+
+def vals_openings(d, c):
+    return sum(([x["date"].strftime("%Y-%m-%d"), round(float(x[c]), 2)] for _, x in d.iterrows()), [])
+
+all_batch_updates.extend([
+    {"range": "AF117:AK117", "values": [vals_openings(monthly, "monthly")]},
+    {"range": "AF122:AK122", "values": [vals_openings(quarterly, "quarterly")]},
+    {"range": "AF127:AK127", "values": [vals_openings(yearly, "yearly")]}
+])
+print("\nJapan Job Openings prepared for batch update successfully")
 
 
 # =============================================================================
