@@ -390,260 +390,249 @@ print("\nJapan Real GDP prepared for batch update successfully")
 
 
 # =============================================================================
-# JAPAN RETAIL SALES (Trading Economics)
+# JAPAN RETAIL SALES (E-Stat API + Dynamic WAF Bypass Fallback)
 # =============================================================================
-print("\nFetching Japan Retail Sales from Trading Economics...")
-
-def get_te_data(url, indicator_name_api):
-    # 1. API Attempt (Works perfectly for select public indicators)
-    api_url = f"https://api.tradingeconomics.com/historical/country/japan/indicator/{urllib.parse.quote(indicator_name_api)}?c=guest:guest&f=json"
-    try:
-        r = session.get(api_url, headers=HEADERS, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list) and len(data) > 0:
-                rows = []
-                for pt in data:
-                    dt_str = pt.get("DateTime") or pt.get("Date")
-                    val = pt.get("Value")
-                    if dt_str and val is not None:
-                        dt = pd.to_datetime(dt_str).replace(day=1).normalize()
-                        rows.append([dt, float(val)])
-                df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
-                if len(df) >= 12:
-                    return df
-    except Exception:
-        pass
-
-    import json
-    import re
-
-    def parse_html(html_text):
-        best_df = None
-        value_pattern = r'-?(?:\d+(?:\.\d*)?|\.\d+)'
-        point_pattern = r'\[\s*\d{13}\s*,\s*(?:' + value_pattern + r'|null|None)\s*\]'
-        array_pattern = r'\[\s*' + point_pattern + r'(?:\s*,\s*' + point_pattern + r')+\s*\]'
-        
-        # Method A: JSON array format 
-        blocks2 = re.findall(r'\[\s*\{[^\]]*?"DateTime"\s*:\s*"[^"]+".*?\}\s*\]', html_text)
-        for block in blocks2:
-            try:
-                data = json.loads(block)
-                rows = []
-                for pt in data:
-                    dt_str = pt.get("DateTime") or pt.get("Date")
-                    val = pt.get("Value")
-                    if dt_str and val is not None:
-                        dt = pd.to_datetime(dt_str).replace(day=1).normalize()
-                        rows.append([dt, float(val)])
-                df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                if len(df) >= 12:
-                    if best_df is None or len(df) > len(best_df): best_df = df
-            except Exception: pass
-        if best_df is not None: return best_df
-        
-        # Method B: Highcharts string array
-        blocks = re.findall(array_pattern, html_text)
-        for block in blocks:
-            try:
-                block_clean = block.replace("null", "None")
-                data = eval(block_clean)
-                rows = []
-                for pt in data:
-                    if len(pt) >= 2 and pt[1] is not None:
-                        try:
-                            dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
-                            rows.append([dt, float(pt[1])])
-                        except Exception: pass
-                df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                if len(df) >= 12:
-                    if best_df is None or len(df) > len(best_df): best_df = df
-            except Exception: continue
-            
-        return best_df
-
-    # 2. curl_cffi attempt (Fastest Web Scrape)
-    try:
-        from curl_cffi import requests as cffi_requests
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
-        from curl_cffi import requests as cffi_requests
-        
-    try:
-        r = cffi_requests.get(url, impersonate="chrome124", timeout=30)
-        if r.status_code == 200 and "verify you are a human" not in r.text and "Cloudflare" not in r.text.title():
-            res = parse_html(r.text)
-            if res is not None:
-                return res
-    except Exception:
-        pass
-
-    # Dynamic Javascript Payload to extract raw xData/yData arrays directly from Highcharts object
-    js_script = """
-    var chart = window.Highcharts && window.Highcharts.charts && window.Highcharts.charts.find(c => c !== undefined);
-    if(chart && chart.series && chart.series.length > 0) {
-        var s = chart.series.find(x => x.name && (x.name.indexOf("Retail Sales") > -1 || x.name.indexOf("YoY") > -1 || x.name.indexOf("MoM") > -1));
-        if (!s) s = chart.series[0];
-        if(s.xData && s.yData) {
-            var res = [];
-            for(var i=0; i<s.xData.length; i++) {
-                if (s.yData[i] !== null && s.yData[i] !== undefined) {
-                    res.push([s.xData[i], s.yData[i]]);
-                }
-            }
-            return res;
-        }
-    }
-    return null;
-    """
-
-    # 3. SeleniumBase Undetectable Browser Attempt
-    try:
-        try:
-            from seleniumbase import SB
-        except ImportError:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "seleniumbase"])
-            from seleniumbase import SB
-            
-        print(" Using undetectable browser (SeleniumBase) to bypass Cloudflare...")
-        with SB(uc=True, headless=True) as sb:
-            sb.open(url)
-            
-            df = None
-            for _ in range(20):
-                sb.sleep(1)
-                try:
-                    js_data = sb.execute_script(js_script)
-                    if js_data:
-                        rows = []
-                        for pt in js_data:
-                            dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
-                            rows.append([dt, float(pt[1])])
-                        temp_df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                        if len(temp_df) >= 12:
-                            df = temp_df
-                            break
-                except Exception:
-                    pass
-                    
-            if df is not None:
-                return df
-                
-            html = sb.get_page_source()
-            res = parse_html(html)
-            if res is not None:
-                return res
-    except Exception:
-        pass
-
-    # 4. undetected_chromedriver as final fallback
-    try:
-        try:
-            import undetected_chromedriver as uc
-        except ImportError:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "undetected-chromedriver", "selenium"])
-            import undetected_chromedriver as uc
-            
-        print(" Using undetected_chromedriver to bypass Cloudflare...")
-        options = uc.ChromeOptions()
-        options.add_argument("--headless=new")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        
-        driver = uc.Chrome(options=options)
-        driver.get(url)
-        
-        df = None
-        for _ in range(20):
-            time.sleep(1)
-            try:
-                js_data = driver.execute_script(js_script)
-                if js_data:
-                    rows = []
-                    for pt in js_data:
-                        dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
-                        rows.append([dt, float(pt[1])])
-                    temp_df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                    if len(temp_df) >= 12:
-                        df = temp_df
-                        break
-            except Exception:
-                pass
-        
-        if df is None:
-            html = driver.page_source
-            df = parse_html(html)
-            
-        driver.quit()
-        if df is not None:
-            return df
-            
-    except Exception as e:
-        print(f" undetected_chromedriver attempt failed: {e}")
-
-    raise Exception(f"Could not extract data from {url}")
-
-try:
-    # Fetch YoY (Annual)
-    yearly_retail = get_te_data("https://tradingeconomics.com/japan/retail-sales-annual", "Retail Sales YoY")
-    yearly_retail = yearly_retail.rename(columns={'change': 'yearly_change'})
-    
-    # Fetch MoM
-    monthly_retail = get_te_data("https://tradingeconomics.com/japan/retail-sales-mom", "Retail Sales MoM")
-    
-    latest_monthly = monthly_retail.tail(3).reset_index(drop=True)
-    print("\nJapan Retail Sales Monthly")
-    print(latest_monthly[["date", "change"]])
-    
-    # Mathematically reconstruct the relative index level dynamically to calculate exact QoQ changes
-    q_index = monthly_retail.copy()
-    q_index['index'] = 100.0
-    for i in range(1, len(q_index)):
-        q_index.loc[i, 'index'] = q_index.loc[i-1, 'index'] * (1 + q_index.loc[i, 'change'] / 100.0)
-        
-    q_index["quarter"] = q_index["date"].dt.to_period("Q")
-    q_retail = (
-        q_index.groupby("quarter")
-         .filter(lambda x: len(x) == 3)
-         .groupby("quarter")["index"]
-         .last()
-    )
-    
-    quarterly_retail = q_retail.pct_change().mul(100).dropna().tail(3).reset_index(name="change")
-    quarterly_retail["date"] = quarterly_retail["quarter"].dt.end_time.dt.normalize()
-    
-    print("\nJapan Retail Sales Quarterly")
-    print(quarterly_retail[["date", "change"]])
-    
-    # Yearly Output
-    latest_yearly = yearly_retail.tail(3).reset_index(drop=True)
-    print("\nJapan Retail Sales Yearly")
-    print(latest_yearly[["date", "yearly_change"]])
-    
-    # Google Sheets Update Preparation
-    monthly_values = []
-    for _, x in latest_monthly.iterrows():
-        monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
-    
-    quarterly_values = []
-    for _, x in quarterly_retail.iterrows():
-        quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
-    
-    yearly_values = []
-    for _, x in latest_yearly.iterrows():
-        yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
-    
-    all_batch_updates.extend([
-        {"range": "H23:M23", "values": [monthly_values]},
-        {"range": "H28:M28", "values": [quarterly_values]},
-        {"range": "H33:M33", "values": [yearly_values]}
-    ])
-    print("\nJapan Retail Sales prepared for batch update successfully")
-
-except Exception as e:
-    print(f"All download attempts for Japan Retail Sales completely failed. Error: {e}")
+# print("\nFetching Japan Retail Sales...")
+# 
+# def get_estat_retail():
+#     APP_ID = "b0bc8765e50cb21888f0bfc4aa3189a2aab22ae7"
+#     target_id = "0003348239" 
+#     
+#     data_url = f"https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData?appId={APP_ID}&statsDataId={target_id}&lang=J"
+#     r = session.get(data_url, headers=HEADERS, timeout=60)
+#     r.raise_for_status()
+#     data = r.json()
+#     
+#     class_objs = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("CLASS_INF", {}).get("CLASS_OBJ", [])
+#     if isinstance(class_objs, dict): class_objs = [class_objs]
+#     elif not isinstance(class_objs, list): class_objs = []
+#         
+#     retail_code = None
+#     cat_id = None
+#     
+#     for c in class_objs:
+#         if not isinstance(c, dict): continue
+#         c_id = c.get("@id")
+#         classes = c.get("CLASS", [])
+#         if isinstance(classes, dict): classes = [classes]
+#         if not isinstance(classes, list): continue
+#             
+#         for cls in classes:
+#             if not isinstance(cls, dict): continue
+#             name = str(cls.get("@name", ""))
+#             # Broad search for retail sales category
+#             if "小売" in name and not any(x in name for x in ["自動車", "機械", "燃料"]):
+#                 retail_code = cls.get("@code")
+#                 cat_id = c_id
+#                 break
+#         if retail_code: break
+#             
+#     if not retail_code:
+#         raise Exception("Could not dynamically find '小売業' category code in E-Stat dataset.")
+#         
+#     values = data.get("GET_STATS_DATA", {}).get("STATISTICAL_DATA", {}).get("DATA_INF", {}).get("VALUE", [])
+#     if not isinstance(values, list):
+#         values = [values] if values else []
+#         
+#     rows = []
+#     for v in values:
+#         if not isinstance(v, dict): continue
+#         if v.get(f"@{cat_id}") == retail_code:
+#             t_str = str(v.get("@time", ""))
+#             if len(t_str) >= 6:
+#                 year = t_str[:4]
+#                 month = t_str[4:6]
+#                 if month != "00" and month.isdigit() and 1 <= int(month) <= 12:
+#                     val = pd.to_numeric(v.get("$"), errors="coerce")
+#                     if pd.notna(val):
+#                         rows.append([pd.Timestamp(int(year), int(month), 1), val])
+#                         
+#     df = pd.DataFrame(rows, columns=["date", "retail"]).groupby("date")["retail"].first().reset_index()
+#     df = df.sort_values("date").reset_index(drop=True)
+#     
+#     if len(df) < 12:
+#         raise Exception("Not enough data points extracted from E-Stat API.")
+#     return df
+# 
+# def get_meti_excel_fallback():
+#     try:
+#         from curl_cffi import requests as cffi_requests
+#     except ImportError:
+#         subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
+#         from curl_cffi import requests as cffi_requests
+#     try:
+#         from bs4 import BeautifulSoup
+#     except ImportError:
+#         subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
+#         from bs4 import BeautifulSoup
+# 
+#     urls_to_check = [
+#         "https://www.meti.go.jp/statistics/tyo/syoudou/result-2.html",
+#         "https://www.meti.go.jp/statistics/tyo/syoudou/result-2/index.html",
+#         "https://www.meti.go.jp/statistics/tyo/syoudou/result/index.html"
+#     ]
+#     
+#     excel_url = None
+#     for url in urls_to_check:
+#         try:
+#             r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
+#             if r.status_code == 200:
+#                 soup = BeautifulSoup(r.text, 'html.parser')
+#                 for link in soup.find_all('a'):
+#                     href = link.get('href', '')
+#                     text = link.get_text()
+#                     if '.xls' in href and any(x in text or x in href for x in ['業種別', '商業販売', '小売', '時系列', 'h2a']):
+#                         excel_url = urllib.parse.urljoin(url, href)
+#                         break
+#             if excel_url: break
+#         except Exception:
+#             pass
+#             
+#     if not excel_url:
+#         raise Exception("Could not dynamically find Excel link on any known METI page.")
+#         
+#     r_excel = cffi_requests.get(excel_url, impersonate="chrome120", headers={"Referer": "https://www.meti.go.jp/"}, timeout=45)
+#     if r_excel.status_code == 200 and (r_excel.content.startswith(b'PK') or r_excel.content.startswith(b'\xd0')):
+#         return BytesIO(r_excel.content)
+#         
+#     raise Exception("Failed to download the dynamic METI Excel file via WAF bypass.")
+# 
+# def load_series(b):
+#     b.seek(0)
+#     xl = pd.ExcelFile(b)
+#     best_df = None
+#     best_retail_col = -1
+#     best_start_row = -1
+#     
+#     for sheet in xl.sheet_names:
+#         df_temp = pd.read_excel(b, sheet_name=sheet, header=None)
+#         
+#         # KEY FIX: Handle Excel visually merged cells by forward-filling the "Year" column
+#         if len(df_temp.columns) > 0:
+#             df_temp[0] = df_temp[0].ffill()
+#             
+#         retail_col = -1
+#         start_row = -1
+#         for row_idx in range(min(100, len(df_temp))):
+#             row_vals = df_temp.iloc[row_idx].astype(str).tolist()
+#             for col_idx, val in enumerate(row_vals):
+#                 val_clean = str(val).replace(" ", "").replace("\n", "")
+#                 if "小売業" in val_clean or "Retail" in val_clean:
+#                     retail_col = col_idx
+#                     start_row = row_idx + 1
+#                     break
+#             if retail_col != -1:
+#                 break
+#                 
+#         if retail_col != -1:
+#             best_df = df_temp
+#             best_retail_col = retail_col
+#             best_start_row = start_row
+#             if any(x in sheet for x in ["季調", "季節", "月", "第1表", "第１表"]):
+#                 break
+#                 
+#     if best_df is None or best_retail_col == -1:
+#         raise Exception(f"Could not dynamically locate '小売業' column. Sheets available: {xl.sheet_names}")
+# 
+#     df = best_df
+#     rows = []
+#     
+#     for i in range(best_start_row, len(df)):
+#         cols = df.iloc[i, 0:5].values
+#         clean_cols = []
+#         for x in cols:
+#             if pd.isna(x): continue
+#             s = str(x).strip()
+#             # Remove trailing .0 from years parsed as floats
+#             if s.endswith('.0'): s = s[:-2]
+#             clean_cols.append(s)
+#             
+#         row_str = "".join(clean_cols)
+#         
+#         # Dynamically matches: 2025年1月, 2025/01, 2025.1, or merged strings like 20251
+#         m = re.search(r"(19\d{2}|20\d{2})\D{0,4}([01]?[0-9])[月\-\/\.]?", row_str)
+#         if not m: continue
+#             
+#         year = int(m.group(1))
+#         month = int(m.group(2))
+#         if month < 1 or month > 12: continue
+#             
+#         date = pd.Timestamp(year, month, 1)
+#         val_raw = df.iloc[i, best_retail_col]
+#         val_str = str(val_raw).replace(',', '').replace('p', '').replace('r', '').replace(' ', '').replace('△', '-').strip()
+#         
+#         value = pd.to_numeric(val_str, errors="coerce")
+#         if pd.notna(value):
+#             rows.append([date, value])
+#             
+#     res = pd.DataFrame(rows, columns=["date", "retail"]).drop_duplicates("date").sort_values("date").reset_index(drop=True)
+#     if len(res) < 12:
+#         raise Exception(f"Failed to extract sufficient time series data. Found {len(res)} rows.")
+#     return res
+# 
+# monthly_retail = None
+# 
+# try:
+#     monthly_retail = get_estat_retail()
+#     print("Successfully retrieved Retail Sales via E-Stat JSON API.")
+# except Exception as e:
+#     print(f"E-Stat API method failed: {e}")
+#     try:
+#         b_excel = get_meti_excel_fallback()
+#         monthly_retail = load_series(b_excel)
+#         print("Successfully retrieved Retail Sales via METI WAF Bypass fallback.")
+#     except Exception as e2:
+#         print(f"METI Excel fallback method failed: {e2}")
+#         raise Exception("All download attempts for Japan Retail Sales completely failed.")
+# 
+# monthly_retail["change"] = monthly_retail["retail"].pct_change() * 100
+# latest_monthly = monthly_retail.dropna(subset=["change"]).tail(3).reset_index(drop=True)
+# 
+# print("\nJapan Retail Sales Monthly")
+# print(latest_monthly[["date", "change"]])
+# 
+# # Quarterly
+# q_retail = monthly_retail.copy()
+# q_retail["quarter"] = q_retail["date"].dt.to_period("Q")
+# q_retail = (
+#     q_retail.groupby("quarter")
+#      .filter(lambda x: len(x) == 3)
+#      .groupby("quarter")["retail"]
+#      .last()
+# )
+# 
+# quarterly_retail = q_retail.pct_change().mul(100).dropna().tail(3).reset_index(name="change")
+# quarterly_retail["date"] = quarterly_retail["quarter"].dt.end_time.dt.normalize()
+# 
+# print("\nJapan Retail Sales Quarterly")
+# print(quarterly_retail[["date", "change"]])
+# 
+# # Yearly
+# monthly_retail["yearly_change"] = monthly_retail["retail"].pct_change(12) * 100
+# yearly_retail = monthly_retail.dropna(subset=["yearly_change"]).tail(3).reset_index(drop=True)
+# 
+# print("\nJapan Retail Sales Yearly")
+# print(yearly_retail[["date", "yearly_change"]])
+# 
+# # Google Sheets Update
+# monthly_values = []
+# for _, x in latest_monthly.iterrows():
+#     monthly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
+# 
+# quarterly_values = []
+# for _, x in quarterly_retail.iterrows():
+#     quarterly_values += [x["date"].strftime("%Y-%m-%d"), round(x["change"], 2)]
+# 
+# yearly_values = []
+# for _, x in yearly_retail.iterrows():
+#     yearly_values += [x["date"].strftime("%Y-%m-%d"), round(x["yearly_change"], 2)]
+# 
+# all_batch_updates.extend([
+#     {"range": "H23:M23", "values": [monthly_values]},
+#     {"range": "H28:M28", "values": [quarterly_values]},
+#     {"range": "H33:M33", "values": [yearly_values]}
+# ])
+# print("\nJapan Retail Sales prepared for batch update successfully")
 
 
 # =============================================================================
@@ -1083,7 +1072,7 @@ print("\nJapan Initial Jobless Claims proxy prepared for batch update successful
 # rows = []
 # 
 # for i in range(5, len(raw)):
-#     y_val = str(raw.iloc[i, 0]).replace("年", "").replace("年度", "").strip()
+#     y_val = str(raw.iloc[i, 0]).replace("年", "").strip()
 #     if not y_val.isdigit(): continue
 #     y_val = int(y_val)
 #     for m_val in months_list:
