@@ -395,7 +395,7 @@ print("\nJapan Real GDP prepared for batch update successfully")
 print("\nFetching Japan Retail Sales from Trading Economics...")
 
 def get_te_data(url, indicator_name_api):
-    # 1. API Attempt (Works perfectly for select public indicators)
+    # 1. API Attempt
     api_url = f"https://api.tradingeconomics.com/historical/country/japan/indicator/{urllib.parse.quote(indicator_name_api)}?c=guest:guest&f=json"
     try:
         r = session.get(api_url, headers=HEADERS, timeout=10)
@@ -415,111 +415,172 @@ def get_te_data(url, indicator_name_api):
     except Exception:
         pass
 
-    # 2. Scraping Attempt Fallback
+    import json
+    import re
+
+    def parse_html(html_text):
+        best_df = None
+        value_pattern = r'-?(?:\d+(?:\.\d*)?|\.\d+)'
+        point_pattern = r'\[\s*\d{13}\s*,\s*(?:' + value_pattern + r'|null|None)\s*\]'
+        array_pattern = r'\[\s*' + point_pattern + r'(?:\s*,\s*' + point_pattern + r')+\s*\]'
+        
+        # Method A: JSON array format 
+        blocks2 = re.findall(r'\[\s*\{[^\]]*?"DateTime"\s*:\s*"[^"]+".*?\}\s*\]', html_text)
+        for block in blocks2:
+            try:
+                data = json.loads(block)
+                rows = []
+                for pt in data:
+                    dt_str = pt.get("DateTime") or pt.get("Date")
+                    val = pt.get("Value")
+                    if dt_str and val is not None:
+                        dt = pd.to_datetime(dt_str).replace(day=1).normalize()
+                        rows.append([dt, float(val)])
+                df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                if len(df) >= 6:
+                    if best_df is None or len(df) > len(best_df): best_df = df
+            except Exception: pass
+        if best_df is not None: return best_df
+        
+        # Method B: Highcharts array
+        blocks = re.findall(array_pattern, html_text)
+        for block in blocks:
+            try:
+                block_clean = block.replace("null", "None")
+                data = eval(block_clean)
+                rows = []
+                for pt in data:
+                    if len(pt) >= 2 and pt[1] is not None:
+                        try:
+                            dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
+                            rows.append([dt, float(pt[1])])
+                        except Exception: pass
+                df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                if len(df) >= 6:
+                    if best_df is None or len(df) > len(best_df): best_df = df
+            except Exception: continue
+        if best_df is not None: return best_df
+
+        # Method C: HTML Table
+        try:
+            dfs = pd.read_html(StringIO(html_text))
+            for df in dfs:
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = ['_'.join(str(c) for c in col).strip() for col in df.columns.values]
+                cols = [str(c).lower() for c in df.columns]
+                if 'actual' in cols:
+                    actual_col = df.columns[cols.index('actual')]
+                    date_col = next((c for c in df.columns if any(x in str(c).lower() for x in ['date', 'calendar', 'time', 'release'])), None)
+                    ref_col = next((c for c in df.columns if 'reference' in str(c).lower() or 'month' in str(c).lower()), None)
+                    
+                    if date_col and actual_col:
+                        df = df.dropna(subset=[date_col, actual_col])
+                        rows = []
+                        for _, row in df.iterrows():
+                            try:
+                                val = float(str(row[actual_col]).replace('%', '').replace('+', '').strip())
+                                if ref_col and pd.notna(row[ref_col]):
+                                    ref_str = str(row[ref_col])
+                                    ref_dt = pd.to_datetime(ref_str, format="%b/%y", errors='coerce')
+                                    if pd.isna(ref_dt): ref_dt = pd.to_datetime(ref_str, errors='coerce')
+                                    if pd.notna(ref_dt):
+                                        rows.append([ref_dt.replace(day=1).normalize(), val])
+                                        continue
+                                cal_str = str(row[date_col]).split()[0]
+                                dt = (pd.to_datetime(cal_str) - pd.DateOffset(months=1)).replace(day=1).normalize()
+                                rows.append([dt, val])
+                            except Exception: continue
+                        res = pd.DataFrame(rows, columns=['date', 'change']).sort_values('date')
+                        if len(res) >= 3:
+                            res = res.drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
+                            if best_df is None or len(res) > len(best_df): best_df = res
+        except Exception: pass
+        return best_df
+
+    # 2. curl_cffi attempt (Fastest Web Scrape)
     try:
         from curl_cffi import requests as cffi_requests
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
         from curl_cffi import requests as cffi_requests
-    import json
-    import re
-    
-    best_df = None
-    value_pattern = r'-?(?:\d+(?:\.\d*)?|\.\d+)'
-    point_pattern = r'\[\s*\d{13}\s*,\s*(?:' + value_pattern + r'|null|None)\s*\]'
-    array_pattern = r'\[\s*' + point_pattern + r'(?:\s*,\s*' + point_pattern + r')+\s*\]'
-    
-    for attempt in range(3):
+        
+    try:
+        r = cffi_requests.get(url, impersonate="chrome124", timeout=30)
+        if r.status_code == 200 and "verify you are a human" not in r.text and "Cloudflare" not in r.text.title():
+            res = parse_html(r.text)
+            if res is not None:
+                return res
+    except Exception:
+        pass
+
+    # 3. SeleniumBase Undetectable Browser Attempt
+    try:
         try:
-            r = cffi_requests.get(url, impersonate="chrome120", timeout=30)
-            if r.status_code == 200 and "Please verify you are a human" not in r.text and "Cloudflare" not in r.text.title():
-                
-                # 2.1 Try JSON Array of Dicts format
-                blocks2 = re.findall(r'\[\s*\{[^\]]*?"DateTime"\s*:\s*"[^"]+".*?\}\s*\]', r.text)
-                for block in blocks2:
-                    try:
-                        data = json.loads(block)
-                        rows = []
-                        for pt in data:
-                            dt_str = pt.get("DateTime") or pt.get("Date")
-                            val = pt.get("Value")
-                            if dt_str and val is not None:
-                                dt = pd.to_datetime(dt_str).replace(day=1).normalize()
-                                rows.append([dt, float(val)])
-                        df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                        if len(df) >= 6:
-                            if best_df is None or len(df) > len(best_df):
-                                best_df = df
-                    except Exception:
-                        pass
-                
-                # 2.2 Try Highcharts standard array format (Direct string-matching isolation)
-                blocks = re.findall(array_pattern, r.text)
-                for block in blocks:
-                    try:
-                        block_clean = block.replace("null", "None")
-                        data = eval(block_clean)
-                        rows = []
-                        for pt in data:
-                            if len(pt) >= 2 and pt[1] is not None:
-                                try:
-                                    dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
-                                    val = float(pt[1])
-                                    rows.append([dt, val])
-                                except Exception:
-                                    pass
-                        df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
-                        if len(df) >= 6:
-                            if best_df is None or len(df) > len(best_df):
-                                best_df = df
-                    except Exception:
-                        continue
-                
-                # 2.3 Try Dynamic HTML Table formatting
-                if best_df is None:
-                    try:
-                        dfs = pd.read_html(StringIO(r.text))
-                        for df in dfs:
-                            if isinstance(df.columns, pd.MultiIndex):
-                                df.columns = ['_'.join(str(c) for c in col).strip() for col in df.columns.values]
-                            cols = [str(c).lower() for c in df.columns]
-                            if 'actual' in cols:
-                                actual_col = df.columns[cols.index('actual')]
-                                date_col = next((c for c in df.columns if any(x in str(c).lower() for x in ['date', 'calendar', 'time', 'release'])), None)
-                                ref_col = next((c for c in df.columns if 'reference' in str(c).lower() or 'month' in str(c).lower()), None)
-                                
-                                if date_col and actual_col:
-                                    df = df.dropna(subset=[date_col, actual_col])
-                                    rows = []
-                                    for _, row in df.iterrows():
-                                        try:
-                                            val = float(str(row[actual_col]).replace('%', '').replace('+', '').strip())
-                                            if ref_col and pd.notna(row[ref_col]):
-                                                ref_str = str(row[ref_col])
-                                                ref_dt = pd.to_datetime(ref_str, format="%b/%y", errors='coerce')
-                                                if pd.isna(ref_dt): ref_dt = pd.to_datetime(ref_str, errors='coerce')
-                                                if pd.notna(ref_dt):
-                                                    rows.append([ref_dt.replace(day=1).normalize(), val])
-                                                    continue
-                                            cal_str = str(row[date_col]).split()[0]
-                                            dt = (pd.to_datetime(cal_str) - pd.DateOffset(months=1)).replace(day=1).normalize()
-                                            rows.append([dt, val])
-                                        except Exception:
-                                            continue
-                                    res = pd.DataFrame(rows, columns=['date', 'change']).sort_values('date')
-                                    if len(res) >= 3:
-                                        res = res.drop_duplicates('date', keep='last').sort_values('date').reset_index(drop=True)
-                                        if best_df is None or len(res) > len(best_df):
-                                            best_df = res
-                    except Exception:
-                        pass
-                
-                if best_df is not None:
-                    return best_df
-        except Exception:
-            pass
-        time.sleep(2)
+            from seleniumbase import SB
+        except ImportError:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "seleniumbase"])
+            from seleniumbase import SB
             
+        print(" Using undetectable browser (SeleniumBase) to bypass Cloudflare...")
+        with SB(uc=True, headless=True) as sb:
+            sb.open(url)
+            sb.sleep(6) # Wait for Cloudflare to validate
+            
+            try:
+                js_data = sb.execute_script(
+                    "var chart = window.Highcharts && window.Highcharts.charts.find(c => c !== undefined); "
+                    "if(chart) return chart.series[0].options.data; return null;"
+                )
+                if js_data:
+                    rows = []
+                    for pt in js_data:
+                        if isinstance(pt, dict) and 'x' in pt and 'y' in pt:
+                            dt = pd.to_datetime(pt['x'], unit='ms').replace(day=1).normalize()
+                            rows.append([dt, float(pt['y'])])
+                        elif isinstance(pt, (list, tuple)) and len(pt) >= 2 and pt[1] is not None:
+                            dt = pd.to_datetime(pt[0], unit='ms').replace(day=1).normalize()
+                            rows.append([dt, float(pt[1])])
+                    df = pd.DataFrame(rows, columns=['date', 'change']).drop_duplicates('date').sort_values('date').reset_index(drop=True)
+                    if len(df) >= 6:
+                        return df
+            except Exception:
+                pass
+                
+            html = sb.get_page_source()
+            res = parse_html(html)
+            if res is not None:
+                return res
+    except Exception as e:
+        print(f" SeleniumBase attempt failed: {e}")
+
+    # 4. undetected_chromedriver as final fallback
+    try:
+        try:
+            import undetected_chromedriver as uc
+        except ImportError:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "undetected-chromedriver", "selenium"])
+            import undetected_chromedriver as uc
+            
+        print(" Using undetected_chromedriver to bypass Cloudflare...")
+        options = uc.ChromeOptions()
+        options.add_argument("--headless=new")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        driver = uc.Chrome(options=options)
+        driver.get(url)
+        time.sleep(8)
+        html = driver.page_source
+        driver.quit()
+        
+        res = parse_html(html)
+        if res is not None:
+            return res
+    except Exception as e:
+        print(f" undetected_chromedriver attempt failed: {e}")
+
     raise Exception(f"Could not extract data from {url}")
 
 try:
