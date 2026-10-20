@@ -405,6 +405,9 @@ def update_google_sheet_with_tweets(accounts):
             # Sanitize "Watch:" out of every retrieved tweet
             content = re.sub(r"Watch:", "", content, flags=re.IGNORECASE)
             
+            # Sanitize "Read more:" out of every retrieved tweet
+            content = re.sub(r"Read more:", "", content, flags=re.IGNORECASE)
+            
             # Remove volume emojis specifically
             content = re.sub(r"🔊", "", content)
             
