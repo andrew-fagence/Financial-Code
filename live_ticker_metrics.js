@@ -34,6 +34,28 @@ const extraConfigs = [
     { symbol: 'OANDA:GBPJPY', row: 56 }
 ];
 
+// Configuration for economics data
+const econConfigs = [
+    { 
+        symbol: 'ECONOMICS:JPRSYY', 
+        monthlyRange: 'Sheet1!H23:M23', 
+        quarterlyRange: 'Sheet1!H28:M28', 
+        yearlyRange: 'Sheet1!H33:M33' 
+    },
+    { 
+        symbol: 'ECONOMICS:JPLFPR', 
+        monthlyRange: 'Sheet1!N117:S117', 
+        quarterlyRange: 'Sheet1!N122:S122', 
+        yearlyRange: 'Sheet1!N127:S127' 
+    },
+    { 
+        symbol: 'ECONOMICS:JPJV', 
+        monthlyRange: 'Sheet1!AF117:AK117', 
+        quarterlyRange: 'Sheet1!AF122:AK122', 
+        yearlyRange: 'Sheet1!AF127:AK127' 
+    }
+];
+
 // =====================================================
 // GOOGLE SHEETS AUTH
 // =====================================================
@@ -48,7 +70,7 @@ const spreadsheetId = '1hsJs7oZY1x3mAQdAfFcQHm3_NDoJT0GepzR8o5tXYlU';
 // BATCH WRITE TO SHEET (1 Single API Call)
 // =====================================================
 
-async function batchWriteToSheet(allData, allExtraData) {
+async function batchWriteToSheet(allData, allExtraData, allEconData) {
     // Explicitly obtain the authenticated client
     const authClient = await auth.getClient();
 
@@ -86,6 +108,28 @@ async function batchWriteToSheet(allData, allExtraData) {
                 item.data.recent15mClose
             ]]
         });
+    }
+
+    // Format economics data for batch update
+    for (const item of allEconData) {
+        if (item.data.monthly) {
+            updateData.push({
+                range: item.config.monthlyRange,
+                values: [item.data.monthly]
+            });
+        }
+        if (item.data.quarterly) {
+            updateData.push({
+                range: item.config.quarterlyRange,
+                values: [item.data.quarterly]
+            });
+        }
+        if (item.data.yearly) {
+            updateData.push({
+                range: item.config.yearlyRange,
+                values: [item.data.yearly]
+            });
+        }
     }
 
     if (updateData.length === 0) return;
@@ -294,11 +338,86 @@ async function processExtraSymbol(symbol, row) {
 }
 
 // =====================================================
+// PROCESS ECONOMICS SYMBOL
+// =====================================================
+async function processEconSymbol(config) {
+    return new Promise((resolve) => {
+        console.log(`\n================================`);
+        console.log(`PROCESSING ECONOMICS DATA for ${config.symbol}`);
+        console.log(`================================`);
+
+        let mDone = false;
+        let qDone = false;
+        let yDone = false;
+        let finished = false;
+
+        const data = { monthly: null, quarterly: null, yearly: null };
+
+        async function finish() {
+            if (finished) return;
+            if (mDone && qDone && yDone) {
+                finished = true;
+                resolve({ config, data });
+            }
+        }
+
+        function extractData(periods) {
+            if (!periods || periods.length < 3) return null;
+            
+            const formatDate = (time) => {
+                const dateObj = new Date(time * 1000);
+                return dateObj.toISOString().split('T')[0]; // Format standard YYYY-MM-DD
+            };
+
+            return [
+                formatDate(periods[2].time), periods[2].close, // Next previous date & value
+                formatDate(periods[1].time), periods[1].close, // Previous date & value
+                formatDate(periods[0].time), periods[0].close  // Most recent date & value
+            ];
+        }
+
+        // --- MONTHLY ---
+        const mChart = new client.Session.Chart();
+        mChart.setMarket(config.symbol, { timeframe: '1M' });
+        mChart.onUpdate(() => {
+            if (!mChart.periods || mChart.periods.length < 3) return;
+            data.monthly = extractData(mChart.periods);
+            console.log(`\n${config.symbol} 1M Extracted`);
+            mDone = true;
+            finish();
+        });
+
+        // --- QUARTERLY (3M) ---
+        const qChart = new client.Session.Chart();
+        qChart.setMarket(config.symbol, { timeframe: '3M' });
+        qChart.onUpdate(() => {
+            if (!qChart.periods || qChart.periods.length < 3) return;
+            data.quarterly = extractData(qChart.periods);
+            console.log(`\n${config.symbol} 3M Extracted`);
+            qDone = true;
+            finish();
+        });
+
+        // --- YEARLY (12M) ---
+        const yChart = new client.Session.Chart();
+        yChart.setMarket(config.symbol, { timeframe: '12M' });
+        yChart.onUpdate(() => {
+            if (!yChart.periods || yChart.periods.length < 3) return;
+            data.yearly = extractData(yChart.periods);
+            console.log(`\n${config.symbol} 12M Extracted`);
+            yDone = true;
+            finish();
+        });
+    });
+}
+
+// =====================================================
 // MAIN
 // =====================================================
 (async () => {
     const allData = [];
     const allExtraData = [];
+    const allEconData = [];
 
     // 1. Process original symbols and store their results
     for (const config of configs) {
@@ -312,11 +431,17 @@ async function processExtraSymbol(symbol, row) {
         allExtraData.push(result);
     }
 
-    // 3. Batch Update all Google Sheets data in a single API call
+    // 3. Process newly requested economics data and store their results
+    for (const config of econConfigs) {
+        const result = await processEconSymbol(config);
+        allEconData.push(result);
+    }
+
+    // 4. Batch Update all Google Sheets data in a single API call
     console.log('\n================================');
     console.log('UPDATING GOOGLE SHEETS...');
     console.log('================================');
-    await batchWriteToSheet(allData, allExtraData);
+    await batchWriteToSheet(allData, allExtraData, allEconData);
 
     client.end();
     console.log('\nALL SYMBOLS COMPLETE');
