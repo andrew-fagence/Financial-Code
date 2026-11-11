@@ -1,8 +1,8 @@
 name: Continuous X Scrapers Run
 
 on:
-  workflow_dispatch:
-  repository_dispatch:
+  workflow_dispatch: # Allows manual UI runs
+  repository_dispatch: # Allows external, instant API triggers
     types: [run-x-scrapers]
 
 jobs:
@@ -36,23 +36,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-uv-playwright-
 
+          # Run uv sync to set up dependencies inside the cloned directory
       - name: Sync uv packages
         run: |
           cd x-scraper
-          uv sync --python 3.12
+          uv sync
 
+          # Corrected: Removed "sudo" from the uv run command. 
+          # Playwright will handle standard system level dependency installation internally.
       - name: Install Playwright and System Dependencies
         run: |
           cd x-scraper
-          uv run --python 3.12 playwright install chromium
-          uv run --python 3.12 playwright install-deps chromium
-          sudo apt-get update
-          sudo apt-get install -y xvfb
+          uv run playwright install chromium
+          uv run playwright install-deps chromium
+          sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Install repository requirements
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Write Session Cookies File
         env:
